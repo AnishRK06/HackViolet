@@ -1,0 +1,666 @@
+import React, { useState, useRef } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  Animated,
+  Dimensions,
+  Platform,
+} from 'react-native';
+import MapView, { Marker, Polygon, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
+import { StatusBar } from 'expo-status-bar';
+import { Shield, Users, Phone, X, Check, AlertTriangle } from 'lucide-react-native';
+
+const { width, height } = Dimensions.get('window');
+
+// VT Drillfield center
+const VT_CENTER = {
+  latitude: 37.2284,
+  longitude: -80.4234,
+  latitudeDelta: 0.015,
+  longitudeDelta: 0.015,
+};
+
+// Blue Light Stations
+const BLUE_LIGHTS = [
+  { id: 1, name: 'Squires Student Center', latitude: 37.2294, longitude: -80.4135 },
+  { id: 2, name: 'War Memorial Hall', latitude: 37.2275, longitude: -80.4220 },
+  { id: 3, name: 'Newman Library', latitude: 37.2299, longitude: -80.4162 },
+];
+
+// Walking Group Location
+const WALKING_GROUP = {
+  latitude: 37.2290,
+  longitude: -80.4180,
+  destination: 'West AJ',
+  members: 3,
+};
+
+// Safety Heatmap Polygon (around Drillfield)
+const HEATMAP_COORDS = [
+  { latitude: 37.2310, longitude: -80.4280 },
+  { latitude: 37.2310, longitude: -80.4180 },
+  { latitude: 37.2260, longitude: -80.4180 },
+  { latitude: 37.2260, longitude: -80.4280 },
+];
+
+// Dark map style
+const darkMapStyle = [
+  { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
+  {
+    featureType: 'administrative.country',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#4b6878' }],
+  },
+  {
+    featureType: 'administrative.land_parcel',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#64779e' }],
+  },
+  {
+    featureType: 'administrative.province',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#4b6878' }],
+  },
+  {
+    featureType: 'landscape.man_made',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#334e87' }],
+  },
+  {
+    featureType: 'landscape.natural',
+    elementType: 'geometry',
+    stylers: [{ color: '#023e58' }],
+  },
+  {
+    featureType: 'poi',
+    elementType: 'geometry',
+    stylers: [{ color: '#283d6a' }],
+  },
+  {
+    featureType: 'poi',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#6f9ba5' }],
+  },
+  {
+    featureType: 'poi',
+    elementType: 'labels.text.stroke',
+    stylers: [{ color: '#1d2c4d' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'geometry.fill',
+    stylers: [{ color: '#023e58' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#3C7680' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'geometry',
+    stylers: [{ color: '#304a7d' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#98a5be' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'labels.text.stroke',
+    stylers: [{ color: '#1d2c4d' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry',
+    stylers: [{ color: '#2c6675' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#255763' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#b0d5ce' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'labels.text.stroke',
+    stylers: [{ color: '#023e58' }],
+  },
+  {
+    featureType: 'transit',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#98a5be' }],
+  },
+  {
+    featureType: 'transit',
+    elementType: 'labels.text.stroke',
+    stylers: [{ color: '#1d2c4d' }],
+  },
+  {
+    featureType: 'transit.line',
+    elementType: 'geometry.fill',
+    stylers: [{ color: '#283d6a' }],
+  },
+  {
+    featureType: 'transit.station',
+    elementType: 'geometry',
+    stylers: [{ color: '#3a4762' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'geometry',
+    stylers: [{ color: '#0e1626' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#4e6d70' }],
+  },
+];
+
+export default function App() {
+  const mapRef = useRef(null);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showWalkingModal, setShowWalkingModal] = useState(false);
+  const [joinedGroup, setJoinedGroup] = useState(false);
+  const [emergencyMode, setEmergencyMode] = useState(false);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Start pulse animation for emergency mode
+  React.useEffect(() => {
+    if (emergencyMode) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.2,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [emergencyMode]);
+
+  const handlePanicPress = () => {
+    setEmergencyMode(true);
+    setShowEmergencyModal(true);
+
+    // Zoom to War Memorial (nearest blue light)
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: 37.2275,
+        longitude: -80.4220,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      }, 1000);
+    }
+  };
+
+  const cancelEmergency = () => {
+    setEmergencyMode(false);
+    setShowEmergencyModal(false);
+
+    // Reset map view
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(VT_CENTER, 1000);
+    }
+  };
+
+  const handleJoinGroup = () => {
+    setJoinedGroup(true);
+    setTimeout(() => {
+      setShowWalkingModal(false);
+    }, 1500);
+  };
+
+  return (
+    <View style={[styles.container, emergencyMode && styles.emergencyContainer]}>
+      <StatusBar style="light" />
+
+      {/* Map */}
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        initialRegion={VT_CENTER}
+        customMapStyle={darkMapStyle}
+        showsUserLocation={true}
+        showsMyLocationButton={false}
+      >
+        {/* Safety Heatmap */}
+        {showHeatmap && (
+          <Polygon
+            coordinates={HEATMAP_COORDS}
+            fillColor="rgba(255, 140, 0, 0.25)"
+            strokeColor="rgba(255, 140, 0, 0.6)"
+            strokeWidth={2}
+          />
+        )}
+
+        {/* Blue Light Stations */}
+        {BLUE_LIGHTS.map((station) => (
+          <Marker
+            key={station.id}
+            coordinate={{ latitude: station.latitude, longitude: station.longitude }}
+            pinColor="#007AFF"
+          >
+            <Callout>
+              <View style={styles.callout}>
+                <Text style={styles.calloutTitle}>🔵 Blue Light Station</Text>
+                <Text style={styles.calloutText}>{station.name}</Text>
+                <Text style={styles.calloutSubtext}>Safe Zone - Emergency Phone</Text>
+              </View>
+            </Callout>
+          </Marker>
+        ))}
+
+        {/* Walking Group */}
+        <Marker
+          coordinate={{ latitude: WALKING_GROUP.latitude, longitude: WALKING_GROUP.longitude }}
+          pinColor="#34C759"
+          onPress={() => setShowWalkingModal(true)}
+        >
+          <Callout onPress={() => setShowWalkingModal(true)}>
+            <View style={styles.callout}>
+              <Text style={styles.calloutTitle}>🚶 Wolfpack Walking Group</Text>
+              <Text style={styles.calloutText}>Heading to {WALKING_GROUP.destination}</Text>
+              <Text style={styles.calloutSubtext}>Tap to join!</Text>
+            </View>
+          </Callout>
+        </Marker>
+      </MapView>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Shield color="#FF6B35" size={28} />
+          <Text style={styles.headerTitle}>Lumina</Text>
+        </View>
+        <Text style={styles.headerSubtitle}>VT Campus Safety</Text>
+      </View>
+
+      {/* Heatmap Toggle FAB */}
+      <TouchableOpacity
+        style={[styles.fab, styles.heatmapFab]}
+        onPress={() => setShowHeatmap(!showHeatmap)}
+      >
+        <View style={styles.fabContent}>
+          <Text style={styles.fabIcon}>🔥</Text>
+          <Text style={styles.fabText}>{showHeatmap ? 'Hide' : 'Show'}</Text>
+        </View>
+      </TouchableOpacity>
+
+      {/* Legend */}
+      <View style={styles.legend}>
+        <Text style={styles.legendTitle}>Map Legend</Text>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#007AFF' }]} />
+          <Text style={styles.legendText}>Blue Light Stations</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#34C759' }]} />
+          <Text style={styles.legendText}>Walking Groups</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#FF8C00' }]} />
+          <Text style={styles.legendText}>Safety Zone</Text>
+        </View>
+      </View>
+
+      {/* Hidden Panic Button (bottom left corner) */}
+      <TouchableOpacity
+        style={styles.panicButton}
+        onLongPress={handlePanicPress}
+        delayLongPress={1000}
+      >
+        <Text style={styles.panicButtonText}>SOS</Text>
+      </TouchableOpacity>
+
+      {/* Walking Group Modal */}
+      <Modal
+        visible={showWalkingModal}
+        transparent={true}
+        animationType="slide"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => {
+                setShowWalkingModal(false);
+                setJoinedGroup(false);
+              }}
+            >
+              <X color="#fff" size={24} />
+            </TouchableOpacity>
+
+            <Users color="#34C759" size={48} />
+            <Text style={styles.modalTitle}>Wolfpack Walking Group</Text>
+            <Text style={styles.modalText}>
+              Join this group heading to {WALKING_GROUP.destination}?
+            </Text>
+            <Text style={styles.modalSubtext}>
+              {WALKING_GROUP.members} people currently in group
+            </Text>
+
+            {joinedGroup ? (
+              <View style={styles.joinedContainer}>
+                <Check color="#34C759" size={32} />
+                <Text style={styles.joinedText}>You've joined the group!</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.joinButton}
+                onPress={handleJoinGroup}
+              >
+                <Text style={styles.joinButtonText}>Join Group</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Emergency Modal */}
+      <Modal
+        visible={showEmergencyModal}
+        transparent={true}
+        animationType="fade"
+      >
+        <Animated.View
+          style={[
+            styles.emergencyOverlay,
+            { transform: [{ scale: pulseAnim }] }
+          ]}
+        >
+          <View style={styles.emergencyContent}>
+            <AlertTriangle color="#FF3B30" size={64} />
+            <Text style={styles.emergencyTitle}>EMERGENCY ACTIVATED</Text>
+            <Text style={styles.emergencyText}>
+              Alerting campus security...
+            </Text>
+            <Text style={styles.emergencyText}>
+              Nearest Blue Light: War Memorial Hall
+            </Text>
+
+            <View style={styles.emergencyActions}>
+              <TouchableOpacity style={styles.callButton}>
+                <Phone color="#fff" size={24} />
+                <Text style={styles.callButtonText}>Call 911</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={cancelEmergency}
+              >
+                <Text style={styles.cancelButtonText}>Cancel Alert</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+  },
+  emergencyContainer: {
+    backgroundColor: '#3a0a0a',
+  },
+  map: {
+    width: width,
+    height: height,
+  },
+  header: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(26, 26, 46, 0.9)',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FF6B35',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#8892b0',
+    marginTop: 4,
+  },
+  fab: {
+    position: 'absolute',
+    backgroundColor: 'rgba(26, 26, 46, 0.9)',
+    borderRadius: 28,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  heatmapFab: {
+    bottom: 100,
+    right: 20,
+  },
+  fabContent: {
+    alignItems: 'center',
+  },
+  fabIcon: {
+    fontSize: 24,
+  },
+  fabText: {
+    color: '#fff',
+    fontSize: 10,
+    marginTop: 4,
+  },
+  legend: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    backgroundColor: 'rgba(26, 26, 46, 0.9)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  legendTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginBottom: 8,
+    fontSize: 12,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  legendText: {
+    color: '#8892b0',
+    fontSize: 11,
+  },
+  callout: {
+    padding: 8,
+    minWidth: 150,
+  },
+  calloutTitle: {
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  calloutText: {
+    fontSize: 12,
+    color: '#333',
+  },
+  calloutSubtext: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 4,
+  },
+  panicButton: {
+    position: 'absolute',
+    bottom: 40,
+    right: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 59, 48, 0.5)',
+  },
+  panicButtonText: {
+    color: 'rgba(255, 59, 48, 0.7)',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    width: width * 0.85,
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 15,
+    right: 15,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 16,
+  },
+  modalText: {
+    fontSize: 16,
+    color: '#8892b0',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  modalSubtext: {
+    fontSize: 14,
+    color: '#34C759',
+    marginTop: 8,
+  },
+  joinButton: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 40,
+    paddingVertical: 14,
+    borderRadius: 25,
+    marginTop: 24,
+  },
+  joinButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  joinedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    gap: 10,
+  },
+  joinedText: {
+    color: '#34C759',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  emergencyOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emergencyContent: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  emergencyTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 20,
+  },
+  emergencyText: {
+    fontSize: 16,
+    color: '#fff',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  emergencyActions: {
+    marginTop: 30,
+    gap: 16,
+  },
+  callButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 30,
+    gap: 10,
+  },
+  callButtonText: {
+    color: '#FF3B30',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  cancelButton: {
+    paddingHorizontal: 40,
+    paddingVertical: 14,
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+});
