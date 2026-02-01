@@ -1,162 +1,84 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  Switch,
-  Image,
-} from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  User,
-  Bell,
-  MapPin,
-  Shield,
-  Phone,
-  ChevronRight,
-  Moon,
-  Share2,
-  HelpCircle,
-  LogOut,
-} from 'lucide-react-native';
+import { User, Bell, MapPin, Shield, Phone, ChevronRight, Moon, Share2, HelpCircle, LogOut } from 'lucide-react-native';
+import { COLORS } from '../theme';
+
+const SettingItem = ({ icon, title, subtitle, onPress, rightElement }) => (
+  <TouchableOpacity style={styles.settingItem} onPress={onPress}>
+    <View style={styles.settingIcon}>{icon}</View>
+    <View style={styles.settingContent}>
+      <Text style={styles.settingTitle}>{title}</Text>
+      {subtitle && <Text style={styles.settingSubtitle}>{subtitle}</Text>}
+    </View>
+    {rightElement || <ChevronRight color={COLORS.text.muted} size={20} />}
+  </TouchableOpacity>
+);
+
+const StatItem = ({ number, label }) => (
+  <View style={styles.statItem}>
+    <Text style={styles.statNumber}>{number}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+);
+
+const ToggleSetting = ({ icon, title, subtitle, value, onValueChange }) => (
+  <SettingItem icon={icon} title={title} subtitle={subtitle} rightElement={
+    <Switch value={value} onValueChange={onValueChange} trackColor={{ false: '#3e3e3e', true: COLORS.accent.success }} />
+  } />
+);
 
 export default function ProfileScreen() {
   const [notifications, setNotifications] = useState(true);
   const [locationSharing, setLocationSharing] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
 
-  const SettingItem = ({ icon, title, subtitle, onPress, rightElement }) => (
-    <TouchableOpacity style={styles.settingItem} onPress={onPress}>
-      <View style={styles.settingIcon}>{icon}</View>
-      <View style={styles.settingContent}>
-        <Text style={styles.settingTitle}>{title}</Text>
-        {subtitle && <Text style={styles.settingSubtitle}>{subtitle}</Text>}
-      </View>
-      {rightElement || <ChevronRight color="#64748b" size={20} />}
-    </TouchableOpacity>
-  );
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <Text style={styles.headerTitle}>Profile</Text>
 
-        {/* Profile Card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatarContainer}>
-            <User color="#fff" size={40} />
-          </View>
+          <View style={styles.avatarContainer}><User color={COLORS.text.primary} size={40} /></View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>Hokie User</Text>
             <Text style={styles.profileEmail}>hokie@vt.edu</Text>
           </View>
-          <TouchableOpacity style={styles.editButton}>
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.editButton}><Text style={styles.editButtonText}>Edit</Text></TouchableOpacity>
         </View>
 
-        {/* Safety Stats */}
         <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>12</Text>
-            <Text style={styles.statLabel}>Safe Walks</Text>
-          </View>
+          <StatItem number="12" label="Safe Walks" />
           <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>5</Text>
-            <Text style={styles.statLabel}>Groups Joined</Text>
-          </View>
+          <StatItem number="5" label="Groups Joined" />
           <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>3</Text>
-            <Text style={styles.statLabel}>Groups Created</Text>
-          </View>
+          <StatItem number="3" label="Groups Created" />
         </View>
 
-        {/* Emergency Contacts */}
         <Text style={styles.sectionTitle}>Emergency Contacts</Text>
         <View style={styles.settingsCard}>
-          <SettingItem
-            icon={<Phone color="#FF3B30" size={22} />}
-            title="Campus Police"
-            subtitle="540-231-6411"
-          />
-          <SettingItem
-            icon={<Phone color="#FF6B35" size={22} />}
-            title="Personal Emergency Contact"
-            subtitle="Add a contact"
-          />
+          <SettingItem icon={<Phone color={COLORS.accent.danger} size={22} />} title="Campus Police" subtitle="540-231-6411" />
+          <SettingItem icon={<Phone color={COLORS.accent.primary} size={22} />} title="Personal Emergency Contact" subtitle="Add a contact" />
         </View>
 
-        {/* Preferences */}
         <Text style={styles.sectionTitle}>Preferences</Text>
         <View style={styles.settingsCard}>
-          <SettingItem
-            icon={<Bell color="#007AFF" size={22} />}
-            title="Notifications"
-            subtitle="Safety alerts and updates"
-            rightElement={
-              <Switch
-                value={notifications}
-                onValueChange={setNotifications}
-                trackColor={{ false: '#3e3e3e', true: '#34C759' }}
-              />
-            }
-          />
-          <SettingItem
-            icon={<MapPin color="#34C759" size={22} />}
-            title="Location Sharing"
-            subtitle="Share with walking groups"
-            rightElement={
-              <Switch
-                value={locationSharing}
-                onValueChange={setLocationSharing}
-                trackColor={{ false: '#3e3e3e', true: '#34C759' }}
-              />
-            }
-          />
-          <SettingItem
-            icon={<Moon color="#8B5CF6" size={22} />}
-            title="Dark Mode"
-            subtitle="Always on for safety"
-            rightElement={
-              <Switch
-                value={darkMode}
-                onValueChange={setDarkMode}
-                trackColor={{ false: '#3e3e3e', true: '#34C759' }}
-              />
-            }
-          />
+          <ToggleSetting icon={<Bell color={COLORS.accent.info} size={22} />} title="Notifications" subtitle="Safety alerts and updates" value={notifications} onValueChange={setNotifications} />
+          <ToggleSetting icon={<MapPin color={COLORS.accent.success} size={22} />} title="Location Sharing" subtitle="Share with walking groups" value={locationSharing} onValueChange={setLocationSharing} />
+          <ToggleSetting icon={<Moon color="#8B5CF6" size={22} />} title="Dark Mode" subtitle="Always on for safety" value={darkMode} onValueChange={setDarkMode} />
         </View>
 
-        {/* More */}
         <Text style={styles.sectionTitle}>More</Text>
         <View style={styles.settingsCard}>
-          <SettingItem
-            icon={<Shield color="#FF6B35" size={22} />}
-            title="Safety Tips"
-            subtitle="Campus safety guidelines"
-          />
-          <SettingItem
-            icon={<Share2 color="#007AFF" size={22} />}
-            title="Share Lumina"
-            subtitle="Help keep friends safe"
-          />
-          <SettingItem
-            icon={<HelpCircle color="#8892b0" size={22} />}
-            title="Help & Support"
-            subtitle="FAQs and contact us"
-          />
+          <SettingItem icon={<Shield color={COLORS.accent.primary} size={22} />} title="Safety Tips" subtitle="Campus safety guidelines" />
+          <SettingItem icon={<Share2 color={COLORS.accent.info} size={22} />} title="Share Lumina" subtitle="Help keep friends safe" />
+          <SettingItem icon={<HelpCircle color={COLORS.text.secondary} size={22} />} title="Help & Support" subtitle="FAQs and contact us" />
         </View>
 
         <TouchableOpacity style={styles.logoutButton}>
-          <LogOut color="#FF3B30" size={20} />
+          <LogOut color={COLORS.accent.danger} size={20} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
-
         <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
@@ -164,145 +86,28 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f172a',
-  },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  avatarContainer: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#FF6B35',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileInfo: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  profileEmail: {
-    fontSize: 14,
-    color: '#8892b0',
-    marginTop: 2,
-  },
-  editButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#FF6B35',
-  },
-  editButtonText: {
-    color: '#FF6B35',
-    fontWeight: '500',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#8892b0',
-    marginTop: 4,
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#8892b0',
-    marginBottom: 12,
-    marginTop: 8,
-  },
-  settingsCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    borderRadius: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: 16,
-    color: '#fff',
-  },
-  settingSubtitle: {
-    fontSize: 13,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    marginTop: 8,
-    gap: 8,
-  },
-  logoutText: {
-    color: '#FF3B30',
-    fontSize: 16,
-    fontWeight: '500',
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg.primary },
+  scrollView: { flex: 1, paddingHorizontal: 20 },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 10, marginBottom: 20 },
+  profileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: COLORS.border },
+  avatarContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: COLORS.accent.primary, justifyContent: 'center', alignItems: 'center' },
+  profileInfo: { flex: 1, marginLeft: 16 },
+  profileName: { fontSize: 20, fontWeight: '600', color: COLORS.text.primary },
+  profileEmail: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2 },
+  editButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.accent.primary },
+  editButtonText: { color: COLORS.accent.primary, fontWeight: '500' },
+  statsContainer: { flexDirection: 'row', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: COLORS.border },
+  statItem: { flex: 1, alignItems: 'center' },
+  statNumber: { fontSize: 28, fontWeight: 'bold', color: COLORS.accent.primary },
+  statLabel: { fontSize: 12, color: COLORS.text.secondary, marginTop: 4 },
+  statDivider: { width: 1, backgroundColor: COLORS.border },
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text.secondary, marginBottom: 12, marginTop: 8 },
+  settingsCard: { backgroundColor: COLORS.bg.card, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
+  settingItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
+  settingIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.05)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  settingContent: { flex: 1 },
+  settingTitle: { fontSize: 16, color: COLORS.text.primary },
+  settingSubtitle: { fontSize: 13, color: COLORS.text.muted, marginTop: 2 },
+  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, marginTop: 8, gap: 8 },
+  logoutText: { color: COLORS.accent.danger, fontSize: 16, fontWeight: '500' },
 });
