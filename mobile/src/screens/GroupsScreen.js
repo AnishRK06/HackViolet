@@ -21,11 +21,11 @@ export default function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups
   useEffect(() => { (async () => { const { status } = await Location.requestForegroundPermissionsAsync(); if (status === 'granted') { const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }); set({ userLocation: { latitude: loc.coords.latitude, longitude: loc.coords.longitude } }); } })(); }, []);
 
   const getWalkingMinutes = (from, to) => { if (!from || !to) return Infinity; const lat1 = from.latitude * Math.PI / 180, lat2 = to.latitude * Math.PI / 180, dLat = lat2 - lat1, dLon = (to.longitude - from.longitude) * Math.PI / 180, a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2; return Math.ceil((6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.3) / 80); };
-  const getTimeRemaining = g => (!g.createdAt || !g.departureMinutes) ? null : Math.max(0, Math.ceil((g.createdAt + g.departureMinutes * 60000 - Date.now()) / 60000));
+  const getTimeRemaining = g => (!g || !g.createdAt || !g.departureMinutes) ? null : Math.max(0, Math.ceil((g.createdAt + g.departureMinutes * 60000 - Date.now()) / 60000));
   const filterGroupsByDistance = groups => !userLocation ? groups : groups.filter(g => !g.startCoords || getTimeRemaining(g) === null || getWalkingMinutes(userLocation, g.startCoords) <= getTimeRemaining(g));
   const isGroupJoined = id => joinedGroups.includes(id);
-  const getMemberCount = g => Array.isArray(g.members) ? g.members.length : g.members || 1;
-  const getReadyCount = g => Array.isArray(g.members) ? g.members.filter(m => m.isReady).length : 0;
+  const getMemberCount = g => g ? (Array.isArray(g.members) ? g.members.length : g.members || 1) : 0;
+  const getReadyCount = g => g && Array.isArray(g.members) ? g.members.filter(m => m.isReady).length : 0;
 
   const handleCreateSearchChange = async text => { set({ createSearchText: text }); if (searchTimeout.current) clearTimeout(searchTimeout.current); if (text.length < 2) { set({ createSuggestions: [] }); return; } set({ isLoadingCreateSuggestions: true }); searchTimeout.current = setTimeout(async () => { set({ createSuggestions: await getAddressSuggestions(text), isLoadingCreateSuggestions: false }); }, 300); };
 
