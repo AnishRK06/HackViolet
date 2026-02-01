@@ -1,12 +1,14 @@
-import React, { useState, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Modal, Animated, Dimensions, TextInput, SafeAreaView, Alert } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Modal, Animated, Dimensions, TextInput, SafeAreaView, Alert, Vibration, Linking, Switch, ActivityIndicator } from 'react-native';
 import MapView, { Marker, Callout, Circle, Polyline } from 'react-native-maps';
 import { StatusBar } from 'expo-status-bar';
 import { registerRootComponent } from 'expo';
 import * as Location from 'expo-location';
-import { Home, Map, Users, User, Shield, MapPin, Phone, Bell, ChevronRight, Clock, Plus, X, Check, AlertTriangle, Navigation, Search, Crosshair, HelpCircle } from 'lucide-react-native';
-import { COLORS } from './theme';
-import { VT_CENTER, BLUE_LIGHTS, VT_LOCATIONS, ACTIVITY_ZONES, API_KEYS, WALKING_GROUPS } from './constants';
+import { Home, Map, Users, User, Shield, MapPin, Phone, Bell, ChevronRight, Clock, Plus, X, Check, AlertTriangle, Navigation, Search, Crosshair, HelpCircle, ChevronLeft, Filter, Info } from 'lucide-react-native';
+import { COLORS } from './theme.js';
+import { VT_CENTER, BLUE_LIGHTS, VT_LOCATIONS, ACTIVITY_ZONES, API_KEYS, INCIDENT_TYPES } from './constants.js';
+import { db } from './src/config/firebase.js';
+import { collection, onSnapshot, addDoc, updateDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -21,41 +23,210 @@ const findMatchingVTLocation = (text) => {
   return null;
 };
 
+// Geocode a location name to get accurate API coordinates
+const geocodeLocation = async (name, hintCoords = null) => {
+  try {
+    const bias = hintCoords ? `&bias=proximity:${hintCoords.longitude},${hintCoords.latitude}` : '';
+    const response = await fetch(`https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(name)}&limit=1${bias}&apiKey=${API_KEYS.geoapifyAutocomplete}`);
+    const data = await response.json();
+    if (data.features?.length > 0) {
+      const f = data.features[0];
+      return { latitude: f.geometry.coordinates[1], longitude: f.geometry.coordinates[0] };
+    }
+  } catch (error) { console.error('Geocoding error:', error); }
+  return null;
+};
+
 const getAddressSuggestions = async (text) => {
   if (!text || text.length < 2) return [];
   const results = [];
   const searchText = text.toLowerCase().trim();
-  const matchingPresets = VT_LOCATIONS.filter(loc => loc.name.toLowerCase().includes(searchText) || loc.aliases?.some(alias => alias.includes(searchText) || searchText.includes(alias))).map(loc => ({ name: loc.name, shortName: loc.name, latitude: loc.latitude, longitude: loc.longitude, isPreset: true }));
-  results.push(...matchingPresets);
-  if (results.length < 5 && text.length >= 3) {
-    try {
-      const response = await fetch(`https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(text)}&filter=circle:-80.4234,37.2284,5000&bias=proximity:-80.4234,37.2284&limit=5&apiKey=${API_KEYS.geoapifyAutocomplete}`);
-      const data = await response.json();
-      const geoapifyResults = data.features?.map(f => ({ name: f.properties.formatted, shortName: f.properties.name || f.properties.street || f.properties.formatted.split(',')[0], latitude: f.geometry.coordinates[1], longitude: f.geometry.coordinates[0], isPreset: false })) || [];
-      for (const geoResult of geoapifyResults) {
-        if (!results.some(r => Math.abs(r.latitude - geoResult.latitude) < 0.0005 && Math.abs(r.longitude - geoResult.longitude) < 0.0005)) results.push(geoResult);
-      }
-    } catch (error) { console.error('Autocomplete error:', error); }
+
+  // Always query Geoapify API for accurate coordinates
+  try {
+    const response = await fetch(`https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(text)}&filter=circle:-80.4234,37.2284,5000&bias=proximity:-80.4234,37.2284&limit=8&apiKey=${API_KEYS.geoapifyAutocomplete}`);
+    const data = await response.json();
+    const geoapifyResults = data.features?.map(f => ({
+      name: f.properties.formatted,
+      shortName: f.properties.name || f.properties.street || f.properties.formatted.split(',')[0],
+      latitude: f.geometry.coordinates[1],
+      longitude: f.geometry.coordinates[0],
+      isPreset: false
+    })) || [];
+    results.push(...geoapifyResults);
+  } catch (error) { console.error('Autocomplete error:', error); }
+
+  // Add VT preset matches that might not be in API results (for common aliases)
+  const matchingPresets = VT_LOCATIONS.filter(loc =>
+    loc.name.toLowerCase().includes(searchText) ||
+    loc.aliases?.some(alias => alias.includes(searchText) || searchText.includes(alias))
+  );
+  for (const preset of matchingPresets) {
+    // Only add if not already in results (by name similarity)
+    if (!results.some(r => r.shortName?.toLowerCase().includes(preset.name.toLowerCase().split(' ')[0]))) {
+      results.push({ name: preset.name, shortName: preset.name, latitude: preset.latitude, longitude: preset.longitude, isPreset: true, needsGeocode: true });
+    }
   }
+
   return results.slice(0, 8);
 };
 
-const getGeoapifyRoute = async (start, end) => {
+// Dynamic danger calculation based on time of day and crime data
+const getZoneDangerLevel = (zone) => {
+  const now = new Date();
+  const hour = now.getHours();
+  const day = now.getDay();
+  let multiplier = 1;
+  if (zone.peakHours?.includes(hour)) multiplier *= 1.5;
+  if (zone.peakDays?.includes(day)) multiplier *= 1.3;
+  if (hour >= 22 || hour <= 2) multiplier *= 1.4;
+  return Math.min(100, Math.round((zone.score || 50) * multiplier));
+};
+
+// Get dynamic intensity based on current danger level
+const getDynamicIntensity = (zone) => {
+  const dangerLevel = getZoneDangerLevel(zone);
+  if (dangerLevel >= 70) return 'high';
+  if (dangerLevel >= 45) return 'medium';
+  return 'low';
+};
+
+const getGeoapifyRoute = async (start, end, waypoints = []) => {
   try {
-    const response = await fetch(`https://api.geoapify.com/v1/routing?waypoints=${start.latitude},${start.longitude}|${end.latitude},${end.longitude}&mode=walk&apiKey=${API_KEYS.geoapifyRouting}`);
+    let waypointStr = `${start.latitude},${start.longitude}`;
+    waypoints.forEach(wp => { waypointStr += `|${wp.latitude},${wp.longitude}`; });
+    waypointStr += `|${end.latitude},${end.longitude}`;
+    const url = `https://api.geoapify.com/v1/routing?waypoints=${waypointStr}&mode=walk&apiKey=${API_KEYS.geoapifyRouting}`;
+    const response = await fetch(url);
     const data = await response.json();
     if (data.features?.length > 0) {
       const route = data.features[0];
       const geometry = route.geometry;
       let allCoords = [];
-      if (geometry.type === 'MultiLineString') geometry.coordinates.forEach(line => line.forEach(([lon, lat]) => allCoords.push({ latitude: lat, longitude: lon })));
+      if (geometry.type === 'MultiLineString') {
+        geometry.coordinates.forEach((line, lineIndex) => {
+          line.forEach(([lon, lat], pointIndex) => {
+            // Skip first point of subsequent legs (duplicate of previous leg's end)
+            if (lineIndex > 0 && pointIndex === 0) return;
+            allCoords.push({ latitude: lat, longitude: lon });
+          });
+        });
+      }
       else if (geometry.type === 'LineString') allCoords = geometry.coordinates.map(([lon, lat]) => ({ latitude: lat, longitude: lon }));
       const properties = route.properties;
-      const steps = properties.legs?.[0]?.steps || [];
+      const steps = properties.legs?.flatMap(leg => leg.steps || []) || [];
       return { coordinates: allCoords, distance: properties.distance, duration: properties.time, steps: steps.map(step => ({ instruction: step.instruction?.text || 'Continue', distance: step.distance, duration: step.time, name: step.name || '' })) };
     }
     return null;
   } catch (error) { console.error('Geoapify routing error:', error); return null; }
+};
+
+// Convert a circular zone to a GeoJSON polygon (for ORS avoid_polygons)
+const zoneToPolygon = (zone, buffer = 20) => {
+  const points = 16; // Number of points to approximate circle
+  const coords = [];
+  const radius = zone.radius + buffer; // Add buffer for safety margin
+
+  for (let i = 0; i <= points; i++) {
+    const angle = (i * 2 * Math.PI) / points;
+    const latOffset = (radius / 111000) * Math.cos(angle);
+    const lonOffset = (radius / (111000 * Math.cos(zone.latitude * Math.PI / 180))) * Math.sin(angle);
+    coords.push([zone.longitude + lonOffset, zone.latitude + latOffset]);
+  }
+
+  return [coords]; // Return as polygon ring
+};
+
+// OpenRouteService routing with polygon avoidance
+const getOpenRouteServiceRoute = async (start, end, avoidZones = []) => {
+  try {
+    const body = {
+      coordinates: [[start.longitude, start.latitude], [end.longitude, end.latitude]],
+    };
+
+    // Add polygon avoidance if zones exist
+    if (avoidZones.length > 0) {
+      const polygons = avoidZones.map(zone => zoneToPolygon(zone));
+      body.options = {
+        avoid_polygons: {
+          type: 'MultiPolygon',
+          coordinates: polygons
+        }
+      };
+    }
+
+    const response = await fetch('https://api.openrouteservice.org/v2/directions/foot-walking/geojson', {
+      method: 'POST',
+      headers: {
+        'Authorization': API_KEYS.openRouteService,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.log('ORS API error:', data.error);
+      return null;
+    }
+
+    if (data.features?.length > 0) {
+      const route = data.features[0];
+      const geometry = route.geometry;
+      const coords = geometry.coordinates.map(([lon, lat]) => ({ latitude: lat, longitude: lon }));
+      const summary = route.properties?.summary || {};
+
+      return {
+        coordinates: coords,
+        distance: summary.distance || 0,
+        duration: summary.duration || 0,
+        steps: []
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('ORS routing error:', error);
+    return null;
+  }
+};
+
+// Get safe route avoiding danger zones using ORS polygon avoidance
+const getSafeRoute = async (start, end) => {
+  const dangerZones = ACTIVITY_ZONES.filter(z => {
+    const intensity = getDynamicIntensity(z);
+    return intensity === 'high' || intensity === 'medium';
+  });
+
+  // Try ORS with polygon avoidance first
+  const orsRoute = await getOpenRouteServiceRoute(start, end, dangerZones);
+  if (orsRoute?.coordinates?.length) {
+    console.log('ORS route successful with polygon avoidance');
+    return orsRoute;
+  }
+
+  console.log('ORS failed, falling back to Geoapify');
+  // Fallback to Geoapify without avoidance
+  return await getGeoapifyRoute(start, end);
+};
+
+const getDistanceMeters = (coord1, coord2) => {
+  const lat1 = coord1.latitude * Math.PI / 180, lat2 = coord2.latitude * Math.PI / 180;
+  const dLat = lat2 - lat1, dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+const formatDistance = (meters) => meters < 1609 ? `${Math.round(meters * 3.281 / 5280 * 100) / 100} mi` : `${(meters / 1609).toFixed(1)} mi`;
+
+const formatTimeAgo = (timestamp) => {
+  const mins = Math.floor((Date.now() - timestamp) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days > 1 ? 's' : ''} ago`;
 };
 
 const getZoneColor = (intensity) => {
@@ -83,20 +254,6 @@ const calculateLocalSafeRoute = (startCoords, endCoords) => {
   return route;
 };
 
-const getSafeRoute = async (startCoords, endCoords) => {
-  try {
-    const prompt = `You are a campus safety routing AI for Virginia Tech. Given these locations:\n\nBlue Light Stations: ${JSON.stringify(BLUE_LIGHTS.map(b => ({ name: b.name, lat: b.latitude, lng: b.longitude })))}\n\nActivity Zones to AVOID: ${JSON.stringify(ACTIVITY_ZONES.map(z => ({ lat: z.latitude, lng: z.longitude, radius: z.radius, danger: z.intensity })))}\n\nCalculate the SAFEST walking route from Start: ${startCoords.latitude}, ${startCoords.longitude} to End: ${endCoords.latitude}, ${endCoords.longitude}\n\nReturn ONLY a valid JSON array of coordinates: [{"latitude": 37.xxx, "longitude": -80.xxx}, ...]`;
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEYS.gemini}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } }) });
-    const data = await response.json();
-    if (data.error) return calculateLocalSafeRoute(startCoords, endCoords);
-    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      let routeText = data.candidates[0].content.parts[0].text.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      return JSON.parse(routeText);
-    }
-    return calculateLocalSafeRoute(startCoords, endCoords);
-  } catch (error) { return calculateLocalSafeRoute(startCoords, endCoords); }
-};
-
 const darkMapStyle = [
   { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
@@ -121,53 +278,223 @@ function SafetyCard({ title, subtitle, icon, color = COLORS.accent.primary, onPr
   );
 }
 
-function SOSButton() {
-  const [showModal, setShowModal] = useState(false);
+function SOSScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const handleLongPress = () => { setShowModal(true); Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.1, duration: 500, useNativeDriver: true }), Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true })])).start(); };
+  const glowAnim = useRef(new Animated.Value(0.5)).current;
+  React.useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.1, duration: 1000, useNativeDriver: true }), Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true })])).start(); Animated.loop(Animated.sequence([Animated.timing(glowAnim, { toValue: 1, duration: 1500, useNativeDriver: true }), Animated.timing(glowAnim, { toValue: 0.5, duration: 1500, useNativeDriver: true })])).start(); }, []);
+  const triggerEmergency = () => { Vibration.vibrate([0, 200, 100, 200, 100, 200]); Alert.alert('EMERGENCY ACTIVATED', 'Alerting campus security...\nNearest Blue Light: War Memorial Hall', [{ text: 'Call 911', onPress: () => Linking.openURL('tel:911') }, { text: 'Cancel', style: 'cancel' }]); };
+  const callNumber = (number) => Linking.openURL(`tel:${number}`);
   return (
-    <>
-      <TouchableOpacity style={styles.sosButton} onLongPress={handleLongPress} delayLongPress={1000} activeOpacity={0.8}>
-        <AlertTriangle color={COLORS.text.primary} size={24} /><Text style={styles.sosButtonText}>SOS</Text>
-      </TouchableOpacity>
-      <Modal visible={showModal} transparent animationType="fade">
-        <View style={styles.emergencyOverlay}>
-          <View style={styles.emergencyContent}>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setShowModal(false)}><X color={COLORS.text.primary} size={24} /></TouchableOpacity>
-            <AlertTriangle color={COLORS.accent.danger} size={64} />
-            <Text style={styles.emergencyTitle}>EMERGENCY ACTIVATED</Text>
-            <Text style={styles.emergencyText}>Alerting campus security...</Text>
-            <Text style={styles.emergencyText}>Nearest Blue Light: War Memorial Hall</Text>
-            <TouchableOpacity style={styles.callButton}><Phone color={COLORS.accent.danger} size={24} /><Text style={styles.callButtonText}>Call 911</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowModal(false)}><Text style={styles.cancelButtonText}>Cancel Alert</Text></TouchableOpacity>
+    <View style={styles.sosScreenContainer}>
+      <Text style={styles.sosScreenTitle}>Emergency</Text>
+      <Text style={styles.sosScreenSubtitle}>Tap the button to trigger emergency alert</Text>
+      <TouchableOpacity onPress={triggerEmergency} activeOpacity={0.8}><Animated.View style={[styles.sosMainButton, { transform: [{ scale: pulseAnim }], opacity: glowAnim }]}><AlertTriangle color={COLORS.text.primary} size={64} /><Text style={styles.sosMainButtonText}>SOS</Text></Animated.View></TouchableOpacity>
+      <Text style={styles.emergencyContactsTitle}>Emergency Contacts</Text>
+      <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('911')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}><Phone color={COLORS.accent.danger} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>911</Text><Text style={styles.emergencyContactDesc}>Emergency Services</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
+      <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('5402316411')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(0, 122, 255, 0.2)' }]}><Phone color={COLORS.accent.info} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>VT Police</Text><Text style={styles.emergencyContactDesc}>540-231-6411</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
+      <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('5402315000')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(255, 149, 0, 0.2)' }]}><Shield color={COLORS.accent.warning} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>Campus Security</Text><Text style={styles.emergencyContactDesc}>540-231-5000</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
+    </View>
+  );
+}
+
+function SOSTabButton({ onPress, onLongPress }) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  React.useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.08, duration: 1200, useNativeDriver: true }), Animated.timing(pulseAnim, { toValue: 1, duration: 1200, useNativeDriver: true })])).start(); }, []);
+  return (
+    <TouchableOpacity onPress={onPress} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.8} style={styles.sosTabButtonContainer}>
+      <Animated.View style={[styles.sosTabButton, { transform: [{ scale: pulseAnim }] }]}><AlertTriangle color={COLORS.text.primary} size={28} /></Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+// Incident Feed Screen
+function IncidentFeedScreen({ onBack }) {
+  const [filter, setFilter] = useState('all');
+  const [incidents, setIncidents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportStep, setReportStep] = useState(1);
+  const [reportType, setReportType] = useState(null);
+  const [reportLocation, setReportLocation] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+
+  // Firebase real-time listener for incidents
+  useEffect(() => {
+    const q = query(collection(db, 'incidents'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const incidentData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toMillis?.() || doc.data().createdAt || Date.now()
+      }));
+      setIncidents(incidentData);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching incidents:', error);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const filteredIncidents = incidents.filter(inc => {
+    if (filter === 'active') return (Date.now() - inc.createdAt) < 24 * 3600000;
+    if (filter === 'verified') return inc.verifications >= 10;
+    return true;
+  }).sort((a, b) => b.createdAt - a.createdAt);
+
+  const handleVerify = async (id) => {
+    try {
+      const incidentRef = doc(db, 'incidents', String(id));
+      const incident = incidents.find(inc => inc.id === id || inc.id === String(id));
+      if (incident) {
+        await updateDoc(incidentRef, { verifications: (incident.verifications || 0) + 1 });
+      }
+    } catch (error) { console.error('Error verifying incident:', error); }
+  };
+  const onRefresh = () => { setRefreshing(true); setTimeout(() => setRefreshing(false), 1000); };
+  const resetReport = () => { setShowReportModal(false); setReportStep(1); setReportType(null); setReportLocation(''); setReportDescription(''); };
+  const submitReport = async () => {
+    if (reportType && reportLocation && reportDescription) {
+      try {
+        await addDoc(collection(db, 'incidents'), {
+          type: reportType,
+          title: INCIDENT_TYPES[reportType].label,
+          location: reportLocation,
+          description: reportDescription,
+          isVTPD: false,
+          verifications: 1,
+          createdAt: Timestamp.now()
+        });
+        resetReport();
+      } catch (error) { console.error('Error submitting report:', error); Alert.alert('Error', 'Failed to submit report'); }
+    }
+  };
+
+  return (
+    <View style={styles.incidentFeedContainer}>
+      <View style={styles.feedHeader}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton}><ChevronLeft color={COLORS.text.primary} size={28} /></TouchableOpacity>
+        <Text style={styles.feedTitle}>Campus Incidents</Text>
+        <View style={{ width: 28 }} />
+      </View>
+      <View style={styles.filterContainer}>
+        {[{ key: 'all', label: 'All' }, { key: 'active', label: 'Active' }, { key: 'verified', label: 'Verified' }].map(f => (
+          <TouchableOpacity key={f.key} style={[styles.filterChip, filter === f.key && styles.filterChipActive]} onPress={() => setFilter(f.key)}>
+            <Text style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]}>{f.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <ScrollView style={styles.incidentList} showsVerticalScrollIndicator={false} refreshControl={<View />}>
+        {loading ? (
+          <View style={styles.emptyState}><ActivityIndicator size="large" color={COLORS.accent.primary} /><Text style={[styles.emptyStateText, { marginTop: 12 }]}>Loading incidents...</Text></View>
+        ) : filteredIncidents.length === 0 ? (
+          <View style={styles.emptyState}><Text style={styles.emptyStateText}>No incidents match this filter</Text></View>
+        ) : filteredIncidents.map(incident => {
+          const type = INCIDENT_TYPES[incident.type];
+          const isExpanded = expandedId === incident.id;
+          return (
+            <TouchableOpacity key={incident.id} style={[styles.incidentCard, { borderLeftColor: type.color }]} onPress={() => setExpandedId(isExpanded ? null : incident.id)} activeOpacity={0.8}>
+              <View style={styles.incidentHeader}>
+                <Text style={styles.incidentTypeIcon}>{type.icon}</Text>
+                <Text style={styles.incidentTitle} numberOfLines={1}>{incident.title}</Text>
+                <View style={[styles.incidentBadge, incident.isVTPD ? styles.incidentBadgeVTPD : styles.incidentBadgeCommunity]}>
+                  <Text style={styles.incidentBadgeText}>{incident.isVTPD ? 'VTPD' : 'Community'}</Text>
+                </View>
+              </View>
+              <View style={styles.incidentMeta}>
+                <MapPin color={COLORS.text.muted} size={14} /><Text style={styles.incidentLocation}>{incident.location}</Text>
+                <Text style={styles.incidentTime}>{formatTimeAgo(incident.createdAt)}</Text>
+              </View>
+              <Text style={[styles.incidentDescription, !isExpanded && { numberOfLines: 2 }]} numberOfLines={isExpanded ? undefined : 2}>{incident.description}</Text>
+              <View style={styles.incidentFooter}>
+                <View style={[styles.verifyCount, { backgroundColor: incident.verifications >= 10 ? 'rgba(52, 199, 89, 0.15)' : 'rgba(255, 255, 255, 0.05)' }]}>
+                  <Check color={incident.verifications >= 10 ? COLORS.accent.success : COLORS.text.muted} size={14} />
+                  <Text style={[styles.verifyCountText, incident.verifications >= 10 && { color: COLORS.accent.success }]}>{incident.verifications}</Text>
+                </View>
+                <TouchableOpacity style={styles.verifyButton} onPress={() => handleVerify(incident.id)}>
+                  <Text style={styles.verifyButtonText}>Verify</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+        <View style={{ height: 100 }} />
+      </ScrollView>
+      <TouchableOpacity style={styles.fab} onPress={() => setShowReportModal(true)}><Plus color={COLORS.text.primary} size={28} /></TouchableOpacity>
+      <Modal visible={showReportModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { width: '90%', maxHeight: '80%' }]}>
+            <TouchableOpacity style={styles.modalClose} onPress={resetReport}><X color={COLORS.text.primary} size={24} /></TouchableOpacity>
+            {reportStep === 1 && (<>
+              <Text style={styles.reportModalTitle}>Report Incident</Text>
+              <Text style={styles.reportModalSubtitle}>Select incident type</Text>
+              <View style={styles.typeGrid}>
+                {Object.values(INCIDENT_TYPES).map(t => (
+                  <TouchableOpacity key={t.id} style={[styles.typeButton, reportType === t.id && { borderColor: t.color, borderWidth: 2 }]} onPress={() => { setReportType(t.id); setReportStep(2); }}>
+                    <Text style={styles.typeButtonIcon}>{t.icon}</Text>
+                    <Text style={styles.typeButtonLabel}>{t.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>)}
+            {reportStep === 2 && (<>
+              <Text style={styles.reportModalTitle}>Location</Text>
+              <Text style={styles.reportModalSubtitle}>Where is this happening?</Text>
+              <TextInput style={styles.reportInput} placeholder="e.g., Newman Library 2nd Floor" placeholderTextColor={COLORS.text.muted} value={reportLocation} onChangeText={setReportLocation} />
+              <View style={styles.reportNavButtons}>
+                <TouchableOpacity style={styles.reportNavButton} onPress={() => setReportStep(1)}><Text style={styles.reportNavButtonText}>Back</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.reportNavButton, styles.reportNavButtonPrimary]} onPress={() => reportLocation && setReportStep(3)}><Text style={styles.reportNavButtonTextPrimary}>Next</Text></TouchableOpacity>
+              </View>
+            </>)}
+            {reportStep === 3 && (<>
+              <Text style={styles.reportModalTitle}>Description</Text>
+              <Text style={styles.reportModalSubtitle}>Describe what you observed</Text>
+              <TextInput style={[styles.reportInput, { height: 120, textAlignVertical: 'top' }]} placeholder="Provide details about the incident..." placeholderTextColor={COLORS.text.muted} value={reportDescription} onChangeText={setReportDescription} multiline />
+              <View style={styles.reportNavButtons}>
+                <TouchableOpacity style={styles.reportNavButton} onPress={() => setReportStep(2)}><Text style={styles.reportNavButtonText}>Back</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.reportNavButton, styles.reportNavButtonPrimary]} onPress={submitReport}><Text style={styles.reportNavButtonTextPrimary}>Submit</Text></TouchableOpacity>
+              </View>
+            </>)}
           </View>
         </View>
       </Modal>
-    </>
+    </View>
   );
 }
 
 // Screens
-function HomeScreen({ setActiveTab }) {
+function HomeScreen({ setActiveTab, getDirectionsToBlueLight, walkingGroups = [], incidents = [] }) {
+  const [nearbyBlueLight, setNearbyBlueLight] = useState(null);
+  const [showIncidentFeed, setShowIncidentFeed] = useState(false);
+  const activeIncidentCount = incidents.filter(i => (Date.now() - i.createdAt) < 24 * 3600000).length;
+  React.useEffect(() => { (async () => { try { const { status } = await Location.requestForegroundPermissionsAsync(); if (status === 'granted') { const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }); const userCoords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude }; let closest = null, minDist = Infinity; BLUE_LIGHTS.forEach(bl => { const dist = getDistanceMeters(userCoords, { latitude: bl.latitude, longitude: bl.longitude }); if (dist < minDist) { minDist = dist; closest = { ...bl, distanceMeters: dist, userCoords }; } }); setNearbyBlueLight(closest); } } catch (e) { console.log('Location error:', e); } })(); }, []);
+
+  if (showIncidentFeed) return <IncidentFeedScreen onBack={() => setShowIncidentFeed(false)} />;
+
   return (
     <ScrollView style={styles.screenContainer} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
         <View style={styles.headerLeft}><Shield color={COLORS.accent.primary} size={32} /><View><Text style={styles.headerTitle}>Lumina</Text><Text style={styles.headerSubtitle}>VT Campus Safety</Text></View></View>
-        <TouchableOpacity style={styles.notificationButton}><Bell color={COLORS.text.primary} size={24} /></TouchableOpacity>
+        <TouchableOpacity style={styles.notificationButton} onPress={() => setShowIncidentFeed(true)}>
+          <Bell color={COLORS.text.primary} size={24} />
+          {activeIncidentCount > 0 && <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{activeIncidentCount}</Text></View>}
+        </TouchableOpacity>
       </View>
       <View style={styles.statusCard}><View style={styles.statusDot} /><Text style={styles.statusText}>Campus Status: Safe</Text><Text style={styles.statusTime}>Updated 2 min ago</Text></View>
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.quickActions}>
         <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('map')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.info + '20' }]}><MapPin color={COLORS.accent.info} size={24} /></View><Text style={styles.quickActionText}>Find Blue{'\n'}Light</Text></TouchableOpacity>
         <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('groups')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.success + '20' }]}><Users color={COLORS.accent.success} size={24} /></View><Text style={styles.quickActionText}>Join{'\n'}Group</Text></TouchableOpacity>
-        <TouchableOpacity style={styles.quickAction}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.primary + '20' }]}><Phone color={COLORS.accent.primary} size={24} /></View><Text style={styles.quickActionText}>Emergency{'\n'}Contacts</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('sos')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.primary + '20' }]}><Phone color={COLORS.accent.primary} size={24} /></View><Text style={styles.quickActionText}>Emergency{'\n'}Contacts</Text></TouchableOpacity>
       </View>
       <Text style={styles.sectionTitle}>Nearby Safety</Text>
-      <SafetyCard title="War Memorial Hall" subtitle="Blue Light Station - 0.2 mi away" icon={<MapPin color={COLORS.accent.info} size={24} />} color={COLORS.accent.info} onPress={() => setActiveTab('map')}>
+      <SafetyCard title={nearbyBlueLight?.name || 'Locating...'} subtitle={nearbyBlueLight ? `Blue Light Station - ${formatDistance(nearbyBlueLight.distanceMeters)} away` : 'Finding nearest blue light...'} icon={<MapPin color={COLORS.accent.info} size={24} />} color={COLORS.accent.info} onPress={() => nearbyBlueLight && getDirectionsToBlueLight(nearbyBlueLight)}>
         <View style={styles.cardAction}><Text style={styles.cardActionText}>Get Directions</Text><ChevronRight color={COLORS.text.secondary} size={20} /></View>
       </SafetyCard>
       <Text style={styles.sectionTitle}>Active Walking Groups</Text>
-      {WALKING_GROUPS.slice(0, 2).map((group) => (
+      {walkingGroups.slice(0, 2).map((group) => (
         <SafetyCard key={group.id} title={group.name} subtitle={`${Array.isArray(group.members) ? group.members.length : group.members || 1} people - ${group.time}`} icon={<Users color={COLORS.accent.success} size={24} />} color={COLORS.accent.success} onPress={() => setActiveTab('groups')}>
           <View style={styles.cardAction}><Text style={styles.cardActionText}>Join Group</Text><ChevronRight color={COLORS.text.secondary} size={20} /></View>
         </SafetyCard>
@@ -177,9 +504,8 @@ function HomeScreen({ setActiveTab }) {
   );
 }
 
-function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute, setMeetingGroupRoute }) {
+function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute, setMeetingGroupRoute, showActivityZones, showLegend, blueLightRoute, setBlueLightRoute, walkingGroups = [] }) {
   const mapRef = useRef(null);
-  const [showActivityZones, setShowActivityZones] = useState(true);
   const [selectedStation, setSelectedStation] = useState(null);
   const [showDirections, setShowDirections] = useState(false);
   const [startLocation, setStartLocation] = useState('');
@@ -201,6 +527,8 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
   const [liveLocation, setLiveLocation] = useState(null);
   const [distanceToNextStep, setDistanceToNextStep] = useState(null);
   const locationSubscription = useRef(null);
+  const [selectedZone, setSelectedZone] = useState(null);
+  const [routeCalculated, setRouteCalculated] = useState(false);
 
   const getDistanceBetween = (coord1, coord2) => {
     if (!coord1 || !coord2) return Infinity;
@@ -235,13 +563,16 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
   React.useEffect(() => {
     if (viewingGroupRoute?.startCoords && viewingGroupRoute?.destCoords) {
       (async () => {
-        setIsLoadingRoute(true); setStartLocation(viewingGroupRoute.startLocation || 'Group Start'); setEndLocation(viewingGroupRoute.destination); setStartCoords(viewingGroupRoute.startCoords); setEndCoords(viewingGroupRoute.destCoords);
+        const start = viewingGroupRoute.startCoords;
+        const end = viewingGroupRoute.destCoords;
+        setIsLoadingRoute(true); setStartLocation(viewingGroupRoute.startLocation || 'Group Start'); setEndLocation(viewingGroupRoute.destination); setStartCoords(start); setEndCoords(end);
         try {
-          const routeData = await getGeoapifyRoute(viewingGroupRoute.startCoords, viewingGroupRoute.destCoords);
+          const routeData = await getSafeRoute(start, end);
           if (routeData?.coordinates.length > 0) {
             setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
             setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
-            mapRef.current?.fitToCoordinates(routeData.coordinates, { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true });
+            setRouteCalculated(true);
+            setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true }); }, 50);
           }
         } catch (error) { console.error('Error fetching group route:', error); }
         setIsLoadingRoute(false); setViewingGroupRoute(null);
@@ -256,40 +587,85 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') { alert('Location permission needed'); setMeetingGroupRoute(null); return; }
         const location = await Location.getCurrentPositionAsync({});
-        const userCoords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
-        setIsLoadingRoute(true); setStartLocation('Your Location'); setEndLocation(meetingGroupRoute.startLocation || 'Meeting Point'); setStartCoords(userCoords); setEndCoords(meetingGroupRoute.startCoords);
-        const routeData = await getGeoapifyRoute(userCoords, meetingGroupRoute.startCoords);
+        const start = { latitude: location.coords.latitude, longitude: location.coords.longitude };
+        const end = meetingGroupRoute.startCoords;
+        setIsLoadingRoute(true); setStartLocation('Your Location'); setEndLocation(meetingGroupRoute.startLocation || 'Meeting Point'); setStartCoords(start); setEndCoords(end);
+        const routeData = await getSafeRoute(start, end);
         if (routeData?.coordinates.length > 0) {
           setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
           setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
-          mapRef.current?.fitToCoordinates(routeData.coordinates, { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true });
+          setRouteCalculated(true);
+          setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 50);
         }
       } catch (error) { console.error('Error:', error); }
       setIsLoadingRoute(false); setMeetingGroupRoute(null);
     })();
   }, [meetingGroupRoute]);
 
-  const handleGetDirections = (station) => { setSelectedStation(station); setShowDirections(true); mapRef.current?.animateToRegion({ latitude: station.latitude, longitude: station.longitude, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 500); };
-  const selectLocation = (location, type) => { const coords = { latitude: location.latitude, longitude: location.longitude }; const name = location.shortName || location.name; if (type === 'start') { setStartLocation(name); setStartCoords(coords); } else { setEndLocation(name); setEndCoords(coords); } setShowLocationPicker(null); setSearchText(''); setSuggestions([]); };
-  const handleSearchChange = (text) => { setSearchText(text); if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); if (text.length < 3) { setSuggestions([]); return; } setIsLoadingSuggestions(true); searchTimeoutRef.current = setTimeout(async () => { setSuggestions(await getAddressSuggestions(text)); setIsLoadingSuggestions(false); }, 300); };
-  const getLocationCoords = (locationName) => { const exactMatch = VT_LOCATIONS.find(l => l.name === locationName); if (exactMatch) return { latitude: exactMatch.latitude, longitude: exactMatch.longitude }; const fuzzyMatch = findMatchingVTLocation(locationName); return fuzzyMatch ? { latitude: fuzzyMatch.latitude, longitude: fuzzyMatch.longitude } : null; };
-
-  const handleFindRoute = async () => {
-    let start = startCoords || getLocationCoords(startLocation), end = endCoords || getLocationCoords(endLocation);
-    if (!start || !end) { alert('Please select valid locations'); return; }
-    setIsLoadingRoute(true); setRouteCoords(null); setRouteInfo(null); setGeoapifySteps([]);
-    try {
-      const routeData = await getGeoapifyRoute(start, end);
+  React.useEffect(() => {
+    if (!blueLightRoute) return;
+    (async () => {
+      const start = blueLightRoute.userCoords;
+      const end = { latitude: blueLightRoute.latitude, longitude: blueLightRoute.longitude };
+      setIsLoadingRoute(true); setStartLocation('Your Location'); setEndLocation(blueLightRoute.name); setStartCoords(start); setEndCoords(end);
+      const routeData = await getSafeRoute(start, end);
       if (routeData?.coordinates.length > 0) {
         setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
         setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
-        mapRef.current?.fitToCoordinates(routeData.coordinates, { edgePadding: { top: 150, right: 50, bottom: 200, left: 50 }, animated: true });
+        setRouteCalculated(true);
+        setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 50);
+      }
+      setIsLoadingRoute(false); setBlueLightRoute(null);
+    })();
+  }, [blueLightRoute]);
+
+  const handleGetDirections = (station) => { setSelectedStation(station); setShowDirections(true); mapRef.current?.animateToRegion({ latitude: station.latitude, longitude: station.longitude, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 500); };
+  const selectLocation = async (location, type) => {
+    let coords = { latitude: location.latitude, longitude: location.longitude };
+    const name = location.shortName || location.name;
+    // If it's a preset, geocode to get accurate API coordinates
+    if (location.needsGeocode || location.isPreset) {
+      const apiCoords = await geocodeLocation(name + ', Virginia Tech, Blacksburg, VA', VT_CENTER);
+      if (apiCoords) coords = apiCoords;
+    }
+    if (type === 'start') { setStartLocation(name); setStartCoords(coords); } else { setEndLocation(name); setEndCoords(coords); }
+    setShowLocationPicker(null); setSearchText(''); setSuggestions([]);
+    // Zoom to selected location
+    mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.006, longitudeDelta: 0.006 }, 400);
+  };
+  const handleSearchChange = (text) => { setSearchText(text); if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); if (text.length < 3) { setSuggestions([]); return; } setIsLoadingSuggestions(true); searchTimeoutRef.current = setTimeout(async () => { setSuggestions(await getAddressSuggestions(text)); setIsLoadingSuggestions(false); }, 300); };
+  const getLocationCoords = async (locationName) => {
+    // First try to geocode via API for accuracy
+    const apiCoords = await geocodeLocation(locationName + ', Blacksburg, VA', VT_CENTER);
+    if (apiCoords) return apiCoords;
+    // Fallback to preset if API fails
+    const exactMatch = VT_LOCATIONS.find(l => l.name === locationName);
+    if (exactMatch) return { latitude: exactMatch.latitude, longitude: exactMatch.longitude };
+    const fuzzyMatch = findMatchingVTLocation(locationName);
+    return fuzzyMatch ? { latitude: fuzzyMatch.latitude, longitude: fuzzyMatch.longitude } : null;
+  };
+
+  const handleFindRoute = async () => {
+    let start = startCoords || await getLocationCoords(startLocation);
+    let end = endCoords || await getLocationCoords(endLocation);
+    if (!start || !end) { alert('Please select valid locations'); return; }
+    setIsLoadingRoute(true); setRouteCoords(null); setRouteInfo(null); setGeoapifySteps([]); setRouteCalculated(false);
+    try {
+      const routeData = await getSafeRoute(start, end);
+      if (routeData?.coordinates.length > 0) {
+        setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
+        setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
+        setRouteCalculated(true);
+        // Small delay to let React flush state before fitting
+        setTimeout(() => {
+          mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 150, right: 50, bottom: 180, left: 50 }, animated: true });
+        }, 50);
       } else alert('Could not find route');
     } catch (error) { alert('Failed to calculate route'); }
     setIsLoadingRoute(false);
   };
 
-  const clearRoute = () => { stopLocationTracking(); setRouteCoords(null); setRouteInfo(null); setStartLocation(''); setEndLocation(''); setStartCoords(null); setEndCoords(null); setGeoapifySteps([]); setIsNavigating(false); setDirections([]); setCurrentStep(0); };
+  const clearRoute = () => { stopLocationTracking(); setRouteCoords(null); setRouteInfo(null); setStartLocation(''); setEndLocation(''); setStartCoords(null); setEndCoords(null); setGeoapifySteps([]); setIsNavigating(false); setDirections([]); setCurrentStep(0); setRouteCalculated(false); };
 
   const generateDirections = (coords, start, end) => {
     if (!coords || coords.length < 2) return [];
@@ -303,10 +679,20 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
 
   const startNavigation = async () => {
     if (!routeCoords || routeCoords.length < 2) return;
-    await startLocationTracking();
     let dirs = geoapifySteps?.length > 0 ? [{ instruction: `Start at ${startLocation}`, detail: 'Begin your safe route', distance: '', icon: 'start', coordinate: routeCoords[0] }, ...geoapifySteps.map((step, i) => ({ instruction: step.instruction, detail: step.name || `Continue for ${Math.round(step.distance)}m`, distance: `${Math.round(step.distance)}m`, icon: 'navigate', coordinate: routeCoords[Math.min(i + 1, routeCoords.length - 1)] })), { instruction: `Arrive at ${endLocation}`, detail: 'Destination reached safely', distance: '', icon: 'destination', coordinate: routeCoords[routeCoords.length - 1] }] : generateDirections(routeCoords, startLocation, endLocation);
     setDirections(dirs); setCurrentStep(0); setIsNavigating(true);
-    mapRef.current?.animateCamera({ center: routeCoords[0], pitch: 60, zoom: 18 }, { duration: 500 });
+    // Only zoom to start if user is near the starting location
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({});
+        const userCoords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        if (getDistanceBetween(userCoords, routeCoords[0]) < 100) {
+          mapRef.current?.animateCamera({ center: routeCoords[0], pitch: 60, zoom: 18 }, { duration: 500 });
+        }
+      }
+    } catch (e) { /* If location fails, just don't zoom */ }
+    await startLocationTracking();
   };
 
   const nextStep = () => { if (currentStep < directions.length - 1) { setCurrentStep(currentStep + 1); if (directions[currentStep + 1]?.coordinate) mapRef.current?.animateToRegion({ ...directions[currentStep + 1].coordinate, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 500); } };
@@ -316,12 +702,12 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
   return (
     <View style={styles.mapContainer}>
       <MapView ref={mapRef} style={styles.map} provider={undefined} initialRegion={VT_CENTER} customMapStyle={darkMapStyle} showsUserLocation showsMyLocationButton={false}>
-        {showActivityZones && ACTIVITY_ZONES.map((zone) => { const colors = getZoneColor(zone.intensity); return <Circle key={zone.id} center={{ latitude: zone.latitude, longitude: zone.longitude }} radius={zone.radius} fillColor={colors.fill} strokeColor={colors.stroke} strokeWidth={2} />; })}
+        {showActivityZones && ACTIVITY_ZONES.map((zone) => { const dynamicIntensity = getDynamicIntensity(zone); const colors = getZoneColor(dynamicIntensity); return <React.Fragment key={zone.id}><Circle center={{ latitude: zone.latitude, longitude: zone.longitude }} radius={zone.radius} fillColor={colors.fill} strokeColor={colors.stroke} strokeWidth={2} /><Marker coordinate={{ latitude: zone.latitude, longitude: zone.longitude }} onPress={() => setSelectedZone(zone)} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.zoneInfoPin}><Info color="#fff" size={14} /></View></Marker></React.Fragment>; })}
         {routeCoords?.length > 0 && <Polyline coordinates={routeCoords} strokeColor={COLORS.accent.success} strokeWidth={4} />}
-        {startCoords && <Marker coordinate={routeCoords?.length > 0 ? routeCoords[0] : startCoords} pinColor={COLORS.accent.success} title="Start" />}
-        {endCoords && <Marker coordinate={routeCoords?.length > 1 ? routeCoords[routeCoords.length - 1] : endCoords} pinColor={COLORS.accent.danger} title="Destination" />}
-        {BLUE_LIGHTS.map((station) => <Marker key={station.id} coordinate={{ latitude: station.latitude, longitude: station.longitude }} pinColor={COLORS.accent.info}><Callout onPress={() => handleGetDirections(station)}><View style={styles.callout}><Text style={styles.calloutTitle}>Blue Light Station</Text><Text style={styles.calloutName}>{station.name}</Text><Text style={styles.calloutDistance}>{station.distance} away</Text></View></Callout></Marker>)}
-        {WALKING_GROUPS.map((group) => <Marker key={group.id} coordinate={{ latitude: group.latitude, longitude: group.longitude }} pinColor={COLORS.accent.success}><Callout><View style={styles.callout}><Text style={styles.calloutTitle}>{group.name}</Text><Text style={styles.calloutName}>To {group.destination}</Text><Text style={styles.calloutDistance}>{Array.isArray(group.members) ? group.members.length : group.members || 1} people</Text></View></Callout></Marker>)}
+        {startCoords && <Marker key={`start-${startCoords.latitude}-${startCoords.longitude}`} coordinate={startCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.startMarker}><Navigation color="#fff" size={14} /></View></Marker>}
+        {endCoords && <Marker key={`end-${endCoords.latitude}-${endCoords.longitude}`} coordinate={endCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.endMarker}><MapPin color="#fff" size={14} /></View></Marker>}
+        {BLUE_LIGHTS.map((station) => <Marker key={station.id} coordinate={{ latitude: station.latitude, longitude: station.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.blueLightMarker}><Phone color="#fff" size={10} /></View><Callout onPress={() => handleGetDirections(station)}><View style={styles.callout}><Text style={styles.calloutTitle}>Blue Light Station</Text><Text style={styles.calloutName}>{station.name}</Text></View></Callout></Marker>)}
+        {walkingGroups.filter(g => g.startCoords).map((group) => <Marker key={group.id} coordinate={{ latitude: group.startCoords.latitude, longitude: group.startCoords.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.groupMarker}><Users color="#fff" size={12} /></View><Callout><View style={styles.callout}><Text style={styles.calloutTitle}>{group.name}</Text><Text style={styles.calloutName}>To {group.destination}</Text><Text style={styles.calloutDistance}>{Array.isArray(group.members) ? group.members.length : group.members || 1} people</Text></View></Callout></Marker>)}
       </MapView>
 
       {!isNavigating && (
@@ -353,11 +739,11 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
         </View>
       )}
 
-      {!isNavigating && <View style={styles.mapControls}><TouchableOpacity style={[styles.controlButton, showActivityZones && styles.controlButtonActive]} onPress={() => setShowActivityZones(!showActivityZones)}><Text style={styles.controlButtonIcon}>⚠️</Text><Text style={styles.controlButtonText}>Zones</Text></TouchableOpacity>{routeCoords && <TouchableOpacity style={[styles.controlButton, { marginTop: 8 }]} onPress={clearRoute}><X color={COLORS.text.primary} size={16} /><Text style={styles.controlButtonText}>Clear</Text></TouchableOpacity>}</View>}
+      {!isNavigating && routeCoords && <View style={styles.mapControls}><TouchableOpacity style={styles.controlButton} onPress={clearRoute}><X color={COLORS.text.primary} size={16} /><Text style={styles.controlButtonText}>Clear</Text></TouchableOpacity></View>}
 
-      {!isNavigating && <View style={styles.legend}><Text style={styles.legendTitle}>Legend</Text><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.info }]} /><Text style={styles.legendText}>Blue Light Stations</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.success }]} /><Text style={styles.legendText}>Safe Route / Groups</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.danger }]} /><Text style={styles.legendText}>High Risk Zone</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.warning }]} /><Text style={styles.legendText}>Medium Risk Zone</Text></View></View>}
+      {!isNavigating && showLegend && <View style={styles.legend}><Text style={styles.legendTitle}>Legend</Text><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.info }]} /><Text style={styles.legendText}>Blue Light Stations</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#8B5CF6' }]} /><Text style={styles.legendText}>Walking Groups</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.success }]} /><Text style={styles.legendText}>Safe Route</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.danger }]} /><Text style={styles.legendText}>High Risk Zone</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.warning }]} /><Text style={styles.legendText}>Medium Risk Zone</Text></View></View>}
 
-      {routeInfo && !isNavigating && <View style={styles.routeInfoPanel}><View style={styles.routeInfoHeader}><Shield color={COLORS.accent.success} size={24} /><Text style={styles.routeInfoTitle}>Safe Route Found</Text></View><View style={styles.routeInfoStats}><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.distance}</Text><Text style={styles.routeInfoStatLabel}>Distance</Text></View><View style={styles.routeInfoStatDivider} /><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.time}</Text><Text style={styles.routeInfoStatLabel}>Walking Time</Text></View></View><TouchableOpacity style={styles.startWalkingButton} onPress={startNavigation}><Navigation color={COLORS.text.primary} size={18} /><Text style={styles.startWalkingButtonText}>Start Walking</Text></TouchableOpacity></View>}
+      {routeInfo && routeCalculated && !isNavigating && <View style={styles.routeInfoPanel}><View style={styles.routeInfoHeader}><Shield color={COLORS.accent.success} size={20} /><Text style={styles.routeInfoTitle}>Safe Route Found</Text></View><View style={styles.routeInfoStats}><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.distance}</Text><Text style={styles.routeInfoStatLabel}>Distance</Text></View><View style={styles.routeInfoStatDivider} /><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.time}</Text><Text style={styles.routeInfoStatLabel}>Time</Text></View></View><TouchableOpacity style={styles.startWalkingButton} onPress={startNavigation}><Navigation color={COLORS.text.primary} size={16} /><Text style={styles.startWalkingButtonText}>Start Walking</Text></TouchableOpacity></View>}
 
       {isNavigating && directions.length > 0 && (
         <View style={styles.navigationPanel}>
@@ -369,11 +755,39 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
       )}
 
       {showDirections && selectedStation && <View style={styles.directionsPanel}><View style={styles.directionsPanelHeader}><View><Text style={styles.directionsPanelTitle}>Directions</Text><Text style={styles.directionsPanelSubtitle}>{selectedStation.name}</Text></View><TouchableOpacity onPress={() => setShowDirections(false)}><X color={COLORS.text.primary} size={24} /></TouchableOpacity></View><View style={styles.directionsInfo}><Navigation color={COLORS.accent.info} size={20} /><Text style={styles.directionsInfoText}>{selectedStation.distance} - ~3 min walk</Text></View><TouchableOpacity style={styles.startButton}><Text style={styles.startButtonText}>Start Walking</Text></TouchableOpacity></View>}
+
+      {selectedZone && (
+        <Modal visible={true} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedZone(null)}>
+            <View style={styles.zoneInfoModal}>
+              <View style={styles.zoneInfoHeader}>
+                <View style={[styles.zoneInfoDot, { backgroundColor: getZoneColor(getDynamicIntensity(selectedZone)).stroke }]} />
+                <Text style={styles.zoneInfoTitle}>{selectedZone.name}</Text>
+              </View>
+              <View style={styles.zoneInfoDangerRow}>
+                <Text style={styles.zoneInfoDangerLabel}>Current Danger Level</Text>
+                <Text style={[styles.zoneInfoDangerValue, { color: getZoneColor(getDynamicIntensity(selectedZone)).stroke }]}>{getZoneDangerLevel(selectedZone)}%</Text>
+              </View>
+              <View style={styles.zoneInfoSection}>
+                <Text style={styles.zoneInfoSectionTitle}>Recent Incidents - Since Nov 2025 ({selectedZone.recentIncidents})</Text>
+                {selectedZone.recentCrimes?.length > 0 ? selectedZone.recentCrimes.map((crime, i) => <View key={i} style={styles.zoneInfoCrimeItem}><Text style={styles.zoneInfoCrimeBullet}>•</Text><Text style={styles.zoneInfoCrimeText}>{crime}</Text></View>) : <Text style={styles.zoneInfoPeakText}>No recent incidents</Text>}
+              </View>
+              <View style={styles.zoneInfoSection}>
+                <Text style={styles.zoneInfoSectionTitle}>Peak Danger Hours</Text>
+                <Text style={styles.zoneInfoPeakText}>{selectedZone.peakHours?.map(h => h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`).join(', ')}</Text>
+              </View>
+              <TouchableOpacity style={styles.zoneInfoCloseButton} onPress={() => setSelectedZone(null)}>
+                <Text style={styles.zoneInfoCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
 
-function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups, viewGroupRoute, getDirectionsToGroup }) {
+function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups, walkingGroups, groupsLoading, viewGroupRoute, getDirectionsToGroup }) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [joined, setJoined] = useState(false);
@@ -399,7 +813,16 @@ function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups
   const isGroupJoined = (groupId) => joinedGroups.includes(groupId);
 
   const handleCreateSearchChange = async (text) => { setCreateSearchText(text); if (createSearchTimeoutRef.current) clearTimeout(createSearchTimeoutRef.current); if (text.length < 2) { setCreateSuggestions([]); return; } setIsLoadingCreateSuggestions(true); createSearchTimeoutRef.current = setTimeout(async () => { setCreateSuggestions(await getAddressSuggestions(text)); setIsLoadingCreateSuggestions(false); }, 300); };
-  const selectCreateLocation = (loc) => { const coords = { latitude: loc.latitude, longitude: loc.longitude }, name = loc.shortName || loc.name; if (activeCreateField === 'start') { setNewGroupStart(name); setNewGroupStartCoords(coords); } else { setNewGroupDestination(name); setNewGroupDestCoords(coords); } setActiveCreateField(null); setCreateSearchText(''); setCreateSuggestions([]); };
+  const selectCreateLocation = async (loc) => {
+    let coords = { latitude: loc.latitude, longitude: loc.longitude };
+    const name = loc.shortName || loc.name;
+    if (loc.needsGeocode || loc.isPreset) {
+      const apiCoords = await geocodeLocation(name + ', Virginia Tech, Blacksburg, VA', VT_CENTER);
+      if (apiCoords) coords = apiCoords;
+    }
+    if (activeCreateField === 'start') { setNewGroupStart(name); setNewGroupStartCoords(coords); } else { setNewGroupDestination(name); setNewGroupDestCoords(coords); }
+    setActiveCreateField(null); setCreateSearchText(''); setCreateSuggestions([]);
+  };
   const useMyLocationForCreate = async () => { try { const { status } = await Location.requestForegroundPermissionsAsync(); if (status === 'granted') { const loc = await Location.getCurrentPositionAsync({}); setNewGroupStart('My Location'); setNewGroupStartCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }); setActiveCreateField(null); setCreateSearchText(''); setCreateSuggestions([]); } } catch (e) { alert('Could not get location'); } };
   const resetCreateModal = () => { setShowCreateModal(false); setNewGroupName(''); setNewGroupStart(''); setNewGroupStartCoords(null); setNewGroupDestination(''); setNewGroupDestCoords(null); setNewGroupDepartureMinutes(10); setActiveCreateField(null); setCreateSearchText(''); setCreateSuggestions([]); };
 
@@ -408,10 +831,36 @@ function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups
     setJoined(true); setTimeout(() => { setShowModal(false); setJoined(false); if (selectedGroup?.startCoords && getDirectionsToGroup) setTimeout(() => Alert.alert('Get Directions', `Get directions to meet ${selectedGroup.name}?`, [{ text: 'No Thanks', style: 'cancel' }, { text: 'Yes', onPress: () => getDirectionsToGroup(selectedGroup) }]), 300); }, 1500);
   };
   const handleLeave = (groupId) => { setJoinedGroups(joinedGroups.filter(id => id !== groupId)); setShowModal(false); };
-  const handleCreateGroup = () => { if (!newGroupName.trim() || !newGroupStart || !newGroupDestination) { alert('Please fill all fields'); return; } const newGroup = { id: Date.now(), name: newGroupName.trim(), startLocation: newGroupStart, startCoords: newGroupStartCoords, destination: newGroupDestination, destCoords: newGroupDestCoords, departureMinutes: newGroupDepartureMinutes, createdAt: Date.now(), members: [{ id: 'currentUser', name: 'You', isReady: true, isCreator: true }], isUserCreated: true }; setUserGroups([newGroup, ...userGroups]); setJoinedGroups([...joinedGroups, newGroup.id]); resetCreateModal(); };
-  const handleCheckIn = (groupId) => { setUserGroups(userGroups.map(g => g.id === groupId && Array.isArray(g.members) ? { ...g, members: g.members.map(m => m.id === 'currentUser' ? { ...m, isReady: true } : m) } : g)); alert("You've checked in!"); };
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim() || !newGroupStart || !newGroupDestination) { alert('Please fill all fields'); return; }
+    try {
+      const docRef = await addDoc(collection(db, 'walkingGroups'), {
+        name: newGroupName.trim(),
+        startLocation: newGroupStart,
+        startCoords: newGroupStartCoords,
+        destination: newGroupDestination,
+        destCoords: newGroupDestCoords,
+        departureMinutes: newGroupDepartureMinutes,
+        createdAt: Timestamp.now(),
+        members: [{ id: 'currentUser', name: 'You', isReady: true, isCreator: true }],
+        isUserCreated: true
+      });
+      setJoinedGroups([...joinedGroups, docRef.id]);
+      resetCreateModal();
+    } catch (error) { console.error('Error creating group:', error); Alert.alert('Error', 'Failed to create group'); }
+  };
+  const handleCheckIn = async (groupId) => {
+    try {
+      const group = allGroups.find(g => g.id === groupId);
+      if (group && Array.isArray(group.members)) {
+        const updatedMembers = group.members.map(m => m.id === 'currentUser' ? { ...m, isReady: true } : m);
+        await updateDoc(doc(db, 'walkingGroups', String(groupId)), { members: updatedMembers });
+        alert("You've checked in!");
+      }
+    } catch (error) { console.error('Error checking in:', error); }
+  };
 
-  const allGroups = [...userGroups, ...WALKING_GROUPS];
+  const allGroups = [...userGroups, ...walkingGroups];
 
   return (
     <ScrollView style={styles.screenContainer} showsVerticalScrollIndicator={false}>
@@ -442,7 +891,7 @@ function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups
   );
 }
 
-function ProfileScreen() {
+function ProfileScreen({ showActivityZones, setShowActivityZones, showLegend, setShowLegend }) {
   return (
     <ScrollView style={styles.screenContainer} showsVerticalScrollIndicator={false}>
       <Text style={styles.screenTitle}>Profile</Text>
@@ -450,6 +899,8 @@ function ProfileScreen() {
       <View style={styles.statsContainer}><View style={styles.statItem}><Text style={styles.statNumber}>12</Text><Text style={styles.statLabel}>Safe Walks</Text></View><View style={styles.statDivider} /><View style={styles.statItem}><Text style={styles.statNumber}>5</Text><Text style={styles.statLabel}>Groups Joined</Text></View><View style={styles.statDivider} /><View style={styles.statItem}><Text style={styles.statNumber}>3</Text><Text style={styles.statLabel}>Groups Created</Text></View></View>
       <Text style={styles.sectionTitle}>Emergency Contacts</Text>
       <View style={styles.settingsCard}><TouchableOpacity style={styles.settingItem}><View style={styles.settingIcon}><Phone color={COLORS.accent.danger} size={22} /></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Campus Police</Text><Text style={styles.settingSubtitle}>540-231-6411</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity></View>
+      <Text style={styles.sectionTitle}>Map Settings</Text>
+      <View style={styles.settingsCard}><View style={styles.settingItem}><View style={styles.settingIcon}><Text style={{ fontSize: 18 }}>⚠️</Text></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Activity Zones</Text><Text style={styles.settingSubtitle}>Show danger zones on map</Text></View><Switch value={showActivityZones} onValueChange={setShowActivityZones} trackColor={{ false: COLORS.text.muted, true: COLORS.accent.primary }} thumbColor={COLORS.text.primary} /></View><View style={styles.settingItem}><View style={styles.settingIcon}><Map color={COLORS.accent.info} size={22} /></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Map Legend</Text><Text style={styles.settingSubtitle}>Show legend on map</Text></View><Switch value={showLegend} onValueChange={setShowLegend} trackColor={{ false: COLORS.text.muted, true: COLORS.accent.primary }} thumbColor={COLORS.text.primary} /></View></View>
       <Text style={styles.sectionTitle}>Settings</Text>
       <View style={styles.settingsCard}><TouchableOpacity style={styles.settingItem}><View style={styles.settingIcon}><Bell color={COLORS.accent.info} size={22} /></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Notifications</Text><Text style={styles.settingSubtitle}>Safety alerts and updates</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity><TouchableOpacity style={styles.settingItem}><View style={styles.settingIcon}><Shield color={COLORS.accent.primary} size={22} /></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Safety Tips</Text><Text style={styles.settingSubtitle}>Campus safety guidelines</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity><TouchableOpacity style={styles.settingItem}><View style={styles.settingIcon}><HelpCircle color={COLORS.text.secondary} size={22} /></View><View style={styles.settingContent}><Text style={styles.settingTitle}>Help & Support</Text><Text style={styles.settingSubtitle}>FAQs and contact us</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity></View>
       <View style={{ height: 120 }} />
@@ -462,20 +913,64 @@ function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [joinedGroups, setJoinedGroups] = useState([]);
   const [userGroups, setUserGroups] = useState([]);
+  const [walkingGroups, setWalkingGroups] = useState([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [incidents, setIncidents] = useState([]);
   const [viewingGroupRoute, setViewingGroupRoute] = useState(null);
   const [meetingGroupRoute, setMeetingGroupRoute] = useState(null);
+  const [showActivityZones, setShowActivityZones] = useState(true);
+  const [showLegend, setShowLegend] = useState(true);
+  const [blueLightRoute, setBlueLightRoute] = useState(null);
+
+  // Firebase listener for walking groups
+  useEffect(() => {
+    const q = query(collection(db, 'walkingGroups'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const groupData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toMillis?.() || doc.data().createdAt || Date.now()
+      }));
+      setWalkingGroups(groupData);
+      setGroupsLoading(false);
+    }, (error) => {
+      console.error('Error fetching walking groups:', error);
+      setGroupsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firebase listener for incidents (for badge count)
+  useEffect(() => {
+    const q = query(collection(db, 'incidents'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const incidentData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toMillis?.() || doc.data().createdAt || Date.now()
+      }));
+      setIncidents(incidentData);
+    }, (error) => {
+      console.error('Error fetching incidents for badge:', error);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const viewGroupRoute = (group) => { setViewingGroupRoute(group); setActiveTab('map'); };
   const getDirectionsToGroup = (group) => { setMeetingGroupRoute(group); setActiveTab('map'); };
+  const getDirectionsToBlueLight = (blueLight) => { setBlueLightRoute(blueLight); setActiveTab('map'); };
 
   const renderScreen = () => {
     switch (activeTab) {
-      case 'home': return <HomeScreen setActiveTab={setActiveTab} />;
-      case 'map': return <MapScreen viewingGroupRoute={viewingGroupRoute} setViewingGroupRoute={setViewingGroupRoute} meetingGroupRoute={meetingGroupRoute} setMeetingGroupRoute={setMeetingGroupRoute} />;
-      case 'groups': return <GroupsScreen joinedGroups={joinedGroups} setJoinedGroups={setJoinedGroups} userGroups={userGroups} setUserGroups={setUserGroups} viewGroupRoute={viewGroupRoute} getDirectionsToGroup={getDirectionsToGroup} />;
-      case 'profile': return <ProfileScreen />;
-      default: return <HomeScreen setActiveTab={setActiveTab} />;
+      case 'home': return <HomeScreen setActiveTab={setActiveTab} getDirectionsToBlueLight={getDirectionsToBlueLight} walkingGroups={walkingGroups} incidents={incidents} />;
+      case 'map': return <MapScreen viewingGroupRoute={viewingGroupRoute} setViewingGroupRoute={setViewingGroupRoute} meetingGroupRoute={meetingGroupRoute} setMeetingGroupRoute={setMeetingGroupRoute} showActivityZones={showActivityZones} showLegend={showLegend} blueLightRoute={blueLightRoute} setBlueLightRoute={setBlueLightRoute} walkingGroups={walkingGroups} />;
+      case 'groups': return <GroupsScreen joinedGroups={joinedGroups} setJoinedGroups={setJoinedGroups} userGroups={userGroups} setUserGroups={setUserGroups} walkingGroups={walkingGroups} groupsLoading={groupsLoading} viewGroupRoute={viewGroupRoute} getDirectionsToGroup={getDirectionsToGroup} />;
+      case 'profile': return <ProfileScreen showActivityZones={showActivityZones} setShowActivityZones={setShowActivityZones} showLegend={showLegend} setShowLegend={setShowLegend} />;
+      case 'sos': return <SOSScreen />;
+      default: return <HomeScreen setActiveTab={setActiveTab} getDirectionsToBlueLight={getDirectionsToBlueLight} />;
     }
   };
+  const handleSOSLongPress = () => { Vibration.vibrate([0, 200, 100, 200, 100, 200]); Alert.alert('EMERGENCY ACTIVATED', 'Alerting campus security...\nNearest Blue Light: War Memorial Hall', [{ text: 'Call 911', onPress: () => Linking.openURL('tel:911') }, { text: 'Cancel', style: 'cancel' }]); };
 
   const TabButton = ({ name, icon, label }) => <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab(name)}>{React.cloneElement(icon, { color: activeTab === name ? COLORS.accent.primary : COLORS.text.muted })}<Text style={[styles.tabLabel, activeTab === name && styles.tabLabelActive]}>{label}</Text></TouchableOpacity>;
 
@@ -483,8 +978,7 @@ function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
       <View style={styles.screenWrapper}>{renderScreen()}</View>
-      <SOSButton />
-      <View style={styles.tabBar}><TabButton name="home" icon={<Home size={24} />} label="Home" /><TabButton name="map" icon={<Map size={24} />} label="Map" /><TabButton name="groups" icon={<Users size={24} />} label="Groups" /><TabButton name="profile" icon={<User size={24} />} label="Profile" /></View>
+      <View style={styles.tabBar}><TabButton name="home" icon={<Home size={24} />} label="Home" /><TabButton name="map" icon={<Map size={24} />} label="Map" /><SOSTabButton onPress={() => setActiveTab('sos')} onLongPress={handleSOSLongPress} /><TabButton name="groups" icon={<Users size={24} />} label="Groups" /><TabButton name="profile" icon={<User size={24} />} label="Profile" /></View>
     </SafeAreaView>
   );
 }
@@ -518,12 +1012,23 @@ const styles = StyleSheet.create({
   cardContent: { marginTop: 12 },
   cardAction: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border },
   cardActionText: { fontSize: 14, color: COLORS.text.secondary },
-  tabBar: { flexDirection: 'row', backgroundColor: COLORS.bg.secondary, borderTopWidth: 1, borderTopColor: COLORS.border, paddingBottom: 25, paddingTop: 10 },
+  tabBar: { flexDirection: 'row', backgroundColor: COLORS.bg.secondary, borderTopWidth: 1, borderTopColor: COLORS.border, paddingBottom: 0, paddingTop: 10 },
   tabButton: { flex: 1, alignItems: 'center', paddingVertical: 8 },
   tabLabel: { fontSize: 11, color: COLORS.text.muted, marginTop: 4, fontWeight: '500' },
   tabLabelActive: { color: COLORS.accent.primary },
-  sosButton: { position: 'absolute', bottom: 100, right: 20, width: 70, height: 70, borderRadius: 35, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', shadowColor: COLORS.accent.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8, zIndex: 100 },
-  sosButtonText: { color: COLORS.text.primary, fontSize: 11, fontWeight: 'bold', marginTop: 2 },
+  sosTabButtonContainer: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', marginBottom: 8 },
+  sosTabButton: { width: 60, height: 60, borderRadius: 30, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', marginTop: -30, shadowColor: COLORS.accent.danger, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15, elevation: 10, borderWidth: 3, borderColor: COLORS.bg.secondary },
+  sosScreenContainer: { flex: 1, backgroundColor: COLORS.bg.primary, paddingHorizontal: 20, paddingTop: 20, alignItems: 'center' },
+  sosScreenTitle: { fontSize: 32, fontWeight: 'bold', color: COLORS.text.primary, marginBottom: 8 },
+  sosScreenSubtitle: { fontSize: 16, color: COLORS.text.secondary, marginBottom: 40, textAlign: 'center' },
+  sosMainButton: { width: 180, height: 180, borderRadius: 90, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', shadowColor: COLORS.accent.danger, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 30, elevation: 15, marginBottom: 50 },
+  sosMainButtonText: { color: COLORS.text.primary, fontSize: 32, fontWeight: 'bold', marginTop: 8 },
+  emergencyContactsTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary, alignSelf: 'flex-start', marginBottom: 16 },
+  emergencyContactItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 12, width: '100%', borderWidth: 1, borderColor: COLORS.border },
+  emergencyContactIcon: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  emergencyContactInfo: { flex: 1 },
+  emergencyContactName: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary },
+  emergencyContactDesc: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2 },
   mapContainer: { flex: 1 },
   map: { flex: 1 },
   mapControls: { position: 'absolute', top: 20, right: 20 },
@@ -536,17 +1041,21 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
   legendText: { color: COLORS.text.secondary, fontSize: 12 },
-  routePanel: { position: 'absolute', top: 10, left: 20, right: 20, backgroundColor: COLORS.bg.cardSolid, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: COLORS.border },
-  routeInputContainer: { marginBottom: 12 },
-  routeInputWrapper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  routeDot: { width: 12, height: 12, borderRadius: 6 },
-  routeInput: { flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 10, padding: 12 },
-  routeInputText: { color: COLORS.text.primary, fontSize: 14 },
-  routeInputPlaceholder: { color: COLORS.text.muted, fontSize: 14 },
-  routeInputDivider: { width: 2, height: 16, backgroundColor: COLORS.border, marginLeft: 5, marginVertical: 4 },
-  findRouteButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, gap: 8 },
+  routePanel: { position: 'absolute', top: 10, left: 16, right: 16, backgroundColor: COLORS.bg.cardSolid, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: COLORS.border },
+  routeInputContainer: { marginBottom: 8 },
+  routeInputWrapper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeDot: { width: 10, height: 10, borderRadius: 5 },
+  routeInput: { flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 8, padding: 10 },
+  routeInputText: { color: COLORS.text.primary, fontSize: 13 },
+  routeInputPlaceholder: { color: COLORS.text.muted, fontSize: 13 },
+  routeInputDivider: { width: 2, height: 12, backgroundColor: COLORS.border, marginLeft: 4, marginVertical: 3 },
+  findRouteButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, gap: 6 },
   findRouteButtonDisabled: { backgroundColor: COLORS.text.muted },
-  findRouteButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
+  findRouteButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '600' },
+  startMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent.success, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  endMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  blueLightMarker: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.accent.info, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
+  groupMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#8B5CF6', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
   locationPickerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center' },
   locationPicker: { backgroundColor: COLORS.bg.secondary, borderRadius: 20, width: '85%', maxHeight: '70%', overflow: 'hidden' },
   locationPickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border },
@@ -563,16 +1072,16 @@ const styles = StyleSheet.create({
   searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, paddingHorizontal: 16, marginHorizontal: 20, marginBottom: 10, gap: 12 },
   searchInput: { flex: 1, color: COLORS.text.primary, fontSize: 16, paddingVertical: 14 },
   loadingText: { color: COLORS.text.muted, fontSize: 14 },
-  routeInfoPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 30 },
-  routeInfoHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
-  routeInfoTitle: { color: COLORS.accent.success, fontSize: 18, fontWeight: '600' },
-  routeInfoStats: { flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, padding: 16, marginBottom: 16 },
+  routeInfoPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 14, paddingBottom: 20 },
+  routeInfoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  routeInfoTitle: { color: COLORS.accent.success, fontSize: 15, fontWeight: '600' },
+  routeInfoStats: { flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 10, padding: 10, marginBottom: 10 },
   routeInfoStat: { flex: 1, alignItems: 'center' },
-  routeInfoStatValue: { color: COLORS.text.primary, fontSize: 24, fontWeight: 'bold' },
-  routeInfoStatLabel: { color: COLORS.text.secondary, fontSize: 12, marginTop: 4 },
+  routeInfoStatValue: { color: COLORS.text.primary, fontSize: 18, fontWeight: 'bold' },
+  routeInfoStatLabel: { color: COLORS.text.secondary, fontSize: 11, marginTop: 2 },
   routeInfoStatDivider: { width: 1, backgroundColor: COLORS.border },
-  startWalkingButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, gap: 8 },
-  startWalkingButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
+  startWalkingButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 10, gap: 6 },
+  startWalkingButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '600' },
   navigationPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 20 },
   navigationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   navigationHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -621,6 +1130,22 @@ const styles = StyleSheet.create({
   groupDetailItem: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   groupDetailText: { fontSize: 13, color: COLORS.text.secondary, flex: 1 },
   modalOverlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'center', alignItems: 'center' },
+  zoneInfoPin: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255, 255, 255, 0.4)' },
+  zoneInfoModal: { backgroundColor: COLORS.bg.cardSolid, borderRadius: 20, padding: 20, width: '85%', maxWidth: 340 },
+  zoneInfoHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  zoneInfoDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+  zoneInfoTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text.primary, flex: 1 },
+  zoneInfoDangerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: 14, marginBottom: 16 },
+  zoneInfoDangerLabel: { fontSize: 14, color: COLORS.text.secondary },
+  zoneInfoDangerValue: { fontSize: 24, fontWeight: 'bold' },
+  zoneInfoSection: { marginBottom: 16 },
+  zoneInfoSectionTitle: { fontSize: 14, fontWeight: '600', color: COLORS.text.secondary, marginBottom: 8 },
+  zoneInfoCrimeItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  zoneInfoCrimeBullet: { color: COLORS.accent.danger, fontSize: 16, marginRight: 8 },
+  zoneInfoCrimeText: { fontSize: 15, color: COLORS.text.primary },
+  zoneInfoPeakText: { fontSize: 14, color: COLORS.text.primary, lineHeight: 20 },
+  zoneInfoCloseButton: { backgroundColor: COLORS.bg.secondary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 },
+  zoneInfoCloseText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
   modalContent: { backgroundColor: COLORS.bg.secondary, borderRadius: 24, padding: 32, alignItems: 'center', width: '85%' },
   modalClose: { position: 'absolute', top: 16, right: 16 },
   modalTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 16 },
@@ -698,6 +1223,51 @@ const styles = StyleSheet.create({
   imHereButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: 'bold' },
   viewRouteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 122, 255, 0.15)', paddingVertical: 14, borderRadius: 12, marginTop: 12, gap: 8 },
   viewRouteButtonText: { color: COLORS.accent.info, fontSize: 16, fontWeight: '600' },
+  // Notification badge
+  notificationBadge: { position: 'absolute', top: -2, right: -2, backgroundColor: COLORS.accent.danger, borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+  notificationBadgeText: { color: COLORS.text.primary, fontSize: 10, fontWeight: 'bold' },
+  // Incident Feed
+  incidentFeedContainer: { flex: 1, backgroundColor: COLORS.bg.primary },
+  feedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
+  backButton: { padding: 4 },
+  feedTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary },
+  filterContainer: { flexDirection: 'row', paddingHorizontal: 16, marginBottom: 12, gap: 8 },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.bg.card, borderWidth: 1, borderColor: COLORS.border },
+  filterChipActive: { backgroundColor: COLORS.accent.primary, borderColor: COLORS.accent.primary },
+  filterChipText: { color: COLORS.text.secondary, fontSize: 14, fontWeight: '500' },
+  filterChipTextActive: { color: COLORS.text.primary },
+  incidentList: { flex: 1, paddingHorizontal: 16 },
+  incidentCard: { backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 14, marginBottom: 12, borderLeftWidth: 4, borderWidth: 1, borderColor: COLORS.border },
+  incidentHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
+  incidentTypeIcon: { fontSize: 18 },
+  incidentTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.text.primary },
+  incidentBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  incidentBadgeVTPD: { backgroundColor: 'rgba(0, 122, 255, 0.2)' },
+  incidentBadgeCommunity: { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+  incidentBadgeText: { fontSize: 10, fontWeight: '600', color: COLORS.text.primary },
+  incidentMeta: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
+  incidentLocation: { color: COLORS.text.secondary, fontSize: 13, flex: 1 },
+  incidentTime: { color: COLORS.text.muted, fontSize: 12 },
+  incidentDescription: { color: COLORS.text.secondary, fontSize: 13, lineHeight: 19, marginBottom: 10 },
+  incidentFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  verifyCount: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, gap: 4 },
+  verifyCountText: { color: COLORS.text.muted, fontSize: 13, fontWeight: '600' },
+  verifyButton: { backgroundColor: 'rgba(255, 107, 53, 0.15)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12 },
+  verifyButtonText: { color: COLORS.accent.primary, fontSize: 13, fontWeight: '600' },
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.accent.primary, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
+  // Report Modal
+  reportModalTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 8, marginBottom: 4 },
+  reportModalSubtitle: { fontSize: 14, color: COLORS.text.secondary, marginBottom: 20 },
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, width: '100%' },
+  typeButton: { width: '48%', backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
+  typeButtonIcon: { fontSize: 28, marginBottom: 8 },
+  typeButtonLabel: { fontSize: 12, color: COLORS.text.primary, textAlign: 'center', fontWeight: '500' },
+  reportInput: { width: '100%', backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 16, color: COLORS.text.primary, fontSize: 16, borderWidth: 1, borderColor: COLORS.border, marginBottom: 20 },
+  reportNavButtons: { flexDirection: 'row', gap: 12, width: '100%' },
+  reportNavButton: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: COLORS.bg.card, borderWidth: 1, borderColor: COLORS.border },
+  reportNavButtonPrimary: { backgroundColor: COLORS.accent.primary, borderColor: COLORS.accent.primary },
+  reportNavButtonText: { color: COLORS.text.secondary, fontSize: 16, fontWeight: '600' },
+  reportNavButtonTextPrimary: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
 });
 
 registerRootComponent(App);
