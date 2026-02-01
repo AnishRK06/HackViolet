@@ -2,10 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Modal, Animated, Dimensions, TextInput, SafeAreaView, Alert, Vibration, Linking, Switch, ActivityIndicator } from 'react-native';
 import MapView, { Marker, Callout, Circle, Polyline } from 'react-native-maps';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { registerRootComponent } from 'expo';
+import { useFonts, CormorantGaramond_400Regular } from '@expo-google-fonts/cormorant-garamond';
 import * as Location from 'expo-location';
 import { Home, Map, Users, User, Shield, MapPin, Phone, Bell, ChevronRight, Clock, Plus, X, Check, AlertTriangle, Navigation, Search, Crosshair, HelpCircle, ChevronLeft, Filter, Info } from 'lucide-react-native';
-import { COLORS } from './theme.js';
+import { COLORS, SHADOWS } from './theme.js';
 import { VT_CENTER, BLUE_LIGHTS, VT_LOCATIONS, ACTIVITY_ZONES, API_KEYS, INCIDENT_TYPES } from './constants.js';
 import { db } from './src/config/firebase.js';
 import { collection, onSnapshot, addDoc, updateDoc, doc, Timestamp, query, orderBy } from 'firebase/firestore';
@@ -254,13 +256,6 @@ const calculateLocalSafeRoute = (startCoords, endCoords) => {
   return route;
 };
 
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#304a7d' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] },
-];
 
 // Components
 function SafetyCard({ title, subtitle, icon, color = COLORS.accent.primary, onPress, children }) {
@@ -291,7 +286,7 @@ function SOSScreen() {
       <TouchableOpacity onPress={triggerEmergency} activeOpacity={0.8}><Animated.View style={[styles.sosMainButton, { transform: [{ scale: pulseAnim }], opacity: glowAnim }]}><AlertTriangle color={COLORS.text.primary} size={64} /><Text style={styles.sosMainButtonText}>SOS</Text></Animated.View></TouchableOpacity>
       <Text style={styles.emergencyContactsTitle}>Emergency Contacts</Text>
       <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('911')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}><Phone color={COLORS.accent.danger} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>911</Text><Text style={styles.emergencyContactDesc}>Emergency Services</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
-      <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('5402316411')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(0, 122, 255, 0.2)' }]}><Phone color={COLORS.accent.info} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>VT Police</Text><Text style={styles.emergencyContactDesc}>540-231-6411</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
+      <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('5402316411')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(30, 64, 175, 0.2)' }]}><Phone color="#1E40AF" size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>VT Police</Text><Text style={styles.emergencyContactDesc}>540-231-6411</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
       <TouchableOpacity style={styles.emergencyContactItem} onPress={() => callNumber('5402315000')}><View style={[styles.emergencyContactIcon, { backgroundColor: 'rgba(255, 149, 0, 0.2)' }]}><Shield color={COLORS.accent.warning} size={24} /></View><View style={styles.emergencyContactInfo}><Text style={styles.emergencyContactName}>Campus Security</Text><Text style={styles.emergencyContactDesc}>540-231-5000</Text></View><ChevronRight color={COLORS.text.muted} size={20} /></TouchableOpacity>
     </View>
   );
@@ -485,12 +480,12 @@ function HomeScreen({ setActiveTab, getDirectionsToBlueLight, walkingGroups = []
       <View style={styles.statusCard}><View style={styles.statusDot} /><Text style={styles.statusText}>Campus Status: Safe</Text><Text style={styles.statusTime}>Updated 2 min ago</Text></View>
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('map')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.info + '20' }]}><MapPin color={COLORS.accent.info} size={24} /></View><Text style={styles.quickActionText}>Find Blue{'\n'}Light</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('map')}><View style={[styles.quickActionIcon, { backgroundColor: 'rgba(30, 64, 175, 0.15)' }]}><MapPin color="#1E40AF" size={24} /></View><Text style={styles.quickActionText}>Find Blue{'\n'}Light</Text></TouchableOpacity>
         <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('groups')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.success + '20' }]}><Users color={COLORS.accent.success} size={24} /></View><Text style={styles.quickActionText}>Join{'\n'}Group</Text></TouchableOpacity>
         <TouchableOpacity style={styles.quickAction} onPress={() => setActiveTab('sos')}><View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent.primary + '20' }]}><Phone color={COLORS.accent.primary} size={24} /></View><Text style={styles.quickActionText}>Emergency{'\n'}Contacts</Text></TouchableOpacity>
       </View>
       <Text style={styles.sectionTitle}>Nearby Safety</Text>
-      <SafetyCard title={nearbyBlueLight?.name || 'Locating...'} subtitle={nearbyBlueLight ? `Blue Light Station - ${formatDistance(nearbyBlueLight.distanceMeters)} away` : 'Finding nearest blue light...'} icon={<MapPin color={COLORS.accent.info} size={24} />} color={COLORS.accent.info} onPress={() => nearbyBlueLight && getDirectionsToBlueLight(nearbyBlueLight)}>
+      <SafetyCard title={nearbyBlueLight?.name || 'Locating...'} subtitle={nearbyBlueLight ? `Blue Light Station - ${formatDistance(nearbyBlueLight.distanceMeters)} away` : 'Finding nearest blue light...'} icon={<MapPin color="#1E40AF" size={24} />} color="#1E40AF" onPress={() => nearbyBlueLight && getDirectionsToBlueLight(nearbyBlueLight)}>
         <View style={styles.cardAction}><Text style={styles.cardActionText}>Get Directions</Text><ChevronRight color={COLORS.text.secondary} size={20} /></View>
       </SafetyCard>
       <Text style={styles.sectionTitle}>Active Walking Groups</Text>
@@ -568,13 +563,26 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
         setIsLoadingRoute(true); setStartLocation(viewingGroupRoute.startLocation || 'Group Start'); setEndLocation(viewingGroupRoute.destination); setStartCoords(start); setEndCoords(end);
         try {
           const routeData = await getSafeRoute(start, end);
-          if (routeData?.coordinates.length > 0) {
-            setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
+          if (routeData?.coordinates?.length > 0) {
+            const fullRoute = [start, ...routeData.coordinates, end];
+            setRouteCoords(fullRoute); setGeoapifySteps(routeData.steps || []);
             setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
             setRouteCalculated(true);
-            setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true }); }, 50);
+            setTimeout(() => { mapRef.current?.fitToCoordinates(fullRoute, { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true }); }, 100);
+          } else {
+            const localRoute = calculateLocalSafeRoute(start, end);
+            setRouteCoords(localRoute); setGeoapifySteps([]);
+            const distance = getDistanceMeters(start, end);
+            setRouteInfo({ distance: distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`, time: `${Math.ceil(distance / 80)} min` });
+            setRouteCalculated(true);
+            setTimeout(() => { mapRef.current?.fitToCoordinates(localRoute, { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true }); }, 100);
           }
-        } catch (error) { console.error('Error fetching group route:', error); }
+        } catch (error) {
+          console.error('Error fetching group route:', error);
+          const fallbackRoute = [start, end];
+          setRouteCoords(fallbackRoute); setRouteCalculated(true);
+          setTimeout(() => { mapRef.current?.fitToCoordinates(fallbackRoute, { edgePadding: { top: 100, right: 50, bottom: 200, left: 50 }, animated: true }); }, 100);
+        }
         setIsLoadingRoute(false); setViewingGroupRoute(null);
       })();
     }
@@ -591,13 +599,23 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
         const end = meetingGroupRoute.startCoords;
         setIsLoadingRoute(true); setStartLocation('Your Location'); setEndLocation(meetingGroupRoute.startLocation || 'Meeting Point'); setStartCoords(start); setEndCoords(end);
         const routeData = await getSafeRoute(start, end);
-        if (routeData?.coordinates.length > 0) {
-          setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
+        if (routeData?.coordinates?.length > 0) {
+          const fullRoute = [start, ...routeData.coordinates, end];
+          setRouteCoords(fullRoute); setGeoapifySteps(routeData.steps || []);
           setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
           setRouteCalculated(true);
-          setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 50);
+          setTimeout(() => { mapRef.current?.fitToCoordinates(fullRoute, { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 100);
+        } else {
+          const localRoute = calculateLocalSafeRoute(start, end);
+          setRouteCoords(localRoute); setGeoapifySteps([]);
+          const distance = getDistanceMeters(start, end);
+          setRouteInfo({ distance: distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`, time: `${Math.ceil(distance / 80)} min` });
+          setRouteCalculated(true);
+          setTimeout(() => { mapRef.current?.fitToCoordinates(localRoute, { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 100);
         }
-      } catch (error) { console.error('Error:', error); }
+      } catch (error) {
+        console.error('Error:', error);
+      }
       setIsLoadingRoute(false); setMeetingGroupRoute(null);
     })();
   }, [meetingGroupRoute]);
@@ -608,12 +626,27 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
       const start = blueLightRoute.userCoords;
       const end = { latitude: blueLightRoute.latitude, longitude: blueLightRoute.longitude };
       setIsLoadingRoute(true); setStartLocation('Your Location'); setEndLocation(blueLightRoute.name); setStartCoords(start); setEndCoords(end);
-      const routeData = await getSafeRoute(start, end);
-      if (routeData?.coordinates.length > 0) {
-        setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
-        setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
-        setRouteCalculated(true);
-        setTimeout(() => { mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 50);
+      try {
+        const routeData = await getSafeRoute(start, end);
+        if (routeData?.coordinates?.length > 0) {
+          const fullRoute = [start, ...routeData.coordinates, end];
+          setRouteCoords(fullRoute); setGeoapifySteps(routeData.steps || []);
+          setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
+          setRouteCalculated(true);
+          setTimeout(() => { mapRef.current?.fitToCoordinates(fullRoute, { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 100);
+        } else {
+          const localRoute = calculateLocalSafeRoute(start, end);
+          setRouteCoords(localRoute); setGeoapifySteps([]);
+          const distance = getDistanceMeters(start, end);
+          setRouteInfo({ distance: distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`, time: `${Math.ceil(distance / 80)} min` });
+          setRouteCalculated(true);
+          setTimeout(() => { mapRef.current?.fitToCoordinates(localRoute, { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 100);
+        }
+      } catch (error) {
+        console.error('Blue light route error:', error);
+        const fallbackRoute = [start, end];
+        setRouteCoords(fallbackRoute); setRouteCalculated(true);
+        setTimeout(() => { mapRef.current?.fitToCoordinates(fallbackRoute, { edgePadding: { top: 100, right: 50, bottom: 150, left: 50 }, animated: true }); }, 100);
       }
       setIsLoadingRoute(false); setBlueLightRoute(null);
     })();
@@ -646,23 +679,74 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
   };
 
   const handleFindRoute = async () => {
-    let start = startCoords || await getLocationCoords(startLocation);
-    let end = endCoords || await getLocationCoords(endLocation);
+    // Get coordinates for start and end locations
+    const start = startCoords || await getLocationCoords(startLocation);
+    const end = endCoords || await getLocationCoords(endLocation);
     if (!start || !end) { alert('Please select valid locations'); return; }
-    setIsLoadingRoute(true); setRouteCoords(null); setRouteInfo(null); setGeoapifySteps([]); setRouteCalculated(false);
+
+    // Store coordinates if they weren't already set
+    if (!startCoords) setStartCoords(start);
+    if (!endCoords) setEndCoords(end);
+
+    setIsLoadingRoute(true);
+
     try {
       const routeData = await getSafeRoute(start, end);
-      if (routeData?.coordinates.length > 0) {
-        setRouteCoords(routeData.coordinates); setGeoapifySteps(routeData.steps);
-        setRouteInfo({ distance: routeData.distance > 1000 ? `${(routeData.distance / 1000).toFixed(1)} km` : `${Math.round(routeData.distance)} m`, time: `${Math.ceil(routeData.duration / 60)} min` });
-        setRouteCalculated(true);
-        // Small delay to let React flush state before fitting
-        setTimeout(() => {
-          mapRef.current?.fitToCoordinates([start, ...routeData.coordinates, end], { edgePadding: { top: 150, right: 50, bottom: 180, left: 50 }, animated: true });
-        }, 50);
-      } else alert('Could not find route');
-    } catch (error) { alert('Failed to calculate route'); }
-    setIsLoadingRoute(false);
+      let routePoints;
+      let routeDistance;
+      let routeDuration;
+
+      if (routeData?.coordinates?.length > 0) {
+        // Ensure start and end are included in route coordinates
+        routePoints = [{ ...start }, ...routeData.coordinates.map(c => ({ ...c })), { ...end }];
+        routeDistance = routeData.distance;
+        routeDuration = routeData.duration;
+        setGeoapifySteps(routeData.steps || []);
+      } else {
+        // Fallback to local safe route calculation if APIs fail
+        console.log('APIs failed, using local safe route calculation');
+        const localRoute = calculateLocalSafeRoute(start, end);
+        routePoints = localRoute.map(c => ({ ...c }));
+        routeDistance = getDistanceMeters(start, end);
+        routeDuration = routeDistance / 1.33; // ~80m/min walking speed
+        setGeoapifySteps([]);
+      }
+
+      // Set route state - always set these together
+      setRouteCoords(routePoints);
+      setRouteInfo({
+        distance: routeDistance > 1000 ? `${(routeDistance / 1000).toFixed(1)} km` : `${Math.round(routeDistance)} m`,
+        time: `${Math.ceil(routeDuration / 60)} min`
+      });
+      setRouteCalculated(true);
+      setIsLoadingRoute(false);
+
+      // Fit map to route after state is set
+      setTimeout(() => {
+        if (routePoints?.length > 0) {
+          mapRef.current?.fitToCoordinates(routePoints, { edgePadding: { top: 150, right: 50, bottom: 180, left: 50 }, animated: true });
+        }
+      }, 150);
+
+    } catch (error) {
+      console.error('Route calculation error:', error);
+      // Even on error, show a direct route as fallback
+      const fallbackRoute = [{ ...start }, { ...end }];
+      const distance = getDistanceMeters(start, end);
+
+      setRouteCoords(fallbackRoute);
+      setRouteInfo({
+        distance: distance > 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`,
+        time: `${Math.ceil(distance / 80)} min`
+      });
+      setGeoapifySteps([]);
+      setRouteCalculated(true);
+      setIsLoadingRoute(false);
+
+      setTimeout(() => {
+        mapRef.current?.fitToCoordinates(fallbackRoute, { edgePadding: { top: 150, right: 50, bottom: 180, left: 50 }, animated: true });
+      }, 150);
+    }
   };
 
   const clearRoute = () => { stopLocationTracking(); setRouteCoords(null); setRouteInfo(null); setStartLocation(''); setEndLocation(''); setStartCoords(null); setEndCoords(null); setGeoapifySteps([]); setIsNavigating(false); setDirections([]); setCurrentStep(0); setRouteCalculated(false); };
@@ -701,13 +785,13 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
 
   return (
     <View style={styles.mapContainer}>
-      <MapView ref={mapRef} style={styles.map} provider={undefined} initialRegion={VT_CENTER} customMapStyle={darkMapStyle} showsUserLocation showsMyLocationButton={false}>
+      <MapView ref={mapRef} style={styles.map} provider={undefined} initialRegion={VT_CENTER} showsUserLocation showsMyLocationButton={false}>
         {showActivityZones && ACTIVITY_ZONES.map((zone) => { const dynamicIntensity = getDynamicIntensity(zone); const colors = getZoneColor(dynamicIntensity); return <React.Fragment key={zone.id}><Circle center={{ latitude: zone.latitude, longitude: zone.longitude }} radius={zone.radius} fillColor={colors.fill} strokeColor={colors.stroke} strokeWidth={2} /><Marker coordinate={{ latitude: zone.latitude, longitude: zone.longitude }} onPress={() => setSelectedZone(zone)} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.zoneInfoPin}><Info color="#fff" size={14} /></View></Marker></React.Fragment>; })}
-        {routeCoords?.length > 0 && <Polyline coordinates={routeCoords} strokeColor={COLORS.accent.success} strokeWidth={4} />}
-        {startCoords && <Marker key={`start-${startCoords.latitude}-${startCoords.longitude}`} coordinate={startCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.startMarker}><Navigation color="#fff" size={14} /></View></Marker>}
-        {endCoords && <Marker key={`end-${endCoords.latitude}-${endCoords.longitude}`} coordinate={endCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.endMarker}><MapPin color="#fff" size={14} /></View></Marker>}
-        {BLUE_LIGHTS.map((station) => <Marker key={station.id} coordinate={{ latitude: station.latitude, longitude: station.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.blueLightMarker}><Phone color="#fff" size={10} /></View><Callout onPress={() => handleGetDirections(station)}><View style={styles.callout}><Text style={styles.calloutTitle}>Blue Light Station</Text><Text style={styles.calloutName}>{station.name}</Text></View></Callout></Marker>)}
-        {walkingGroups.filter(g => g.startCoords).map((group) => <Marker key={group.id} coordinate={{ latitude: group.startCoords.latitude, longitude: group.startCoords.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.groupMarker}><Users color="#fff" size={12} /></View><Callout><View style={styles.callout}><Text style={styles.calloutTitle}>{group.name}</Text><Text style={styles.calloutName}>To {group.destination}</Text><Text style={styles.calloutDistance}>{Array.isArray(group.members) ? group.members.length : group.members || 1} people</Text></View></Callout></Marker>)}
+        {routeCoords?.length > 0 && <Polyline key={`route-${routeCoords.length}-${routeCoords[0]?.latitude}`} coordinates={[...routeCoords]} strokeColor={COLORS.accent.success} strokeWidth={4} />}
+        {startCoords && <Marker key={`start-${startCoords.latitude}-${startCoords.longitude}`} coordinate={startCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.startMarker}><Navigation color="#2D2D2D" size={14} /></View></Marker>}
+        {endCoords && <Marker key={`end-${endCoords.latitude}-${endCoords.longitude}`} coordinate={endCoords} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.endMarker}><MapPin color="#2D2D2D" size={14} /></View></Marker>}
+        {BLUE_LIGHTS.map((station) => <Marker key={station.id} coordinate={{ latitude: station.latitude, longitude: station.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.blueLightMarker}><Phone color="#2D2D2D" size={10} /></View><Callout onPress={() => handleGetDirections(station)}><View style={styles.callout}><Text style={styles.calloutTitle}>Blue Light Station</Text><Text style={styles.calloutName}>{station.name}</Text></View></Callout></Marker>)}
+        {walkingGroups.filter(g => g.startCoords).map((group) => <Marker key={group.id} coordinate={{ latitude: group.startCoords.latitude, longitude: group.startCoords.longitude }} anchor={{ x: 0.5, y: 0.5 }}><View style={styles.groupMarker}><Users color="#2D2D2D" size={12} /></View><Callout><View style={styles.callout}><Text style={styles.calloutTitle}>{group.name}</Text><Text style={styles.calloutName}>To {group.destination}</Text><Text style={styles.calloutDistance}>{Array.isArray(group.members) ? group.members.length : group.members || 1} people</Text></View></Callout></Marker>)}
       </MapView>
 
       {!isNavigating && (
@@ -718,7 +802,7 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
             <View style={styles.routeInputWrapper}><View style={[styles.routeDot, { backgroundColor: COLORS.accent.danger }]} /><TouchableOpacity style={styles.routeInput} onPress={() => setShowLocationPicker('end')}><Text style={endLocation ? styles.routeInputText : styles.routeInputPlaceholder}>{endLocation || 'Destination'}</Text></TouchableOpacity></View>
           </View>
           <TouchableOpacity style={[styles.findRouteButton, isLoadingRoute && styles.findRouteButtonDisabled]} onPress={handleFindRoute} disabled={isLoadingRoute || !startLocation || !endLocation}>
-            {isLoadingRoute ? <Text style={styles.findRouteButtonText}>Finding safe route...</Text> : <><Search color={COLORS.text.primary} size={18} /><Text style={styles.findRouteButtonText}>Find Safe Route</Text></>}
+            {isLoadingRoute ? <Text style={styles.findRouteButtonText}>Finding safe route...</Text> : <><Search color="#2D2D2D" size={18} /><Text style={styles.findRouteButtonText}>Find Safe Route</Text></>}
           </TouchableOpacity>
         </View>
       )}
@@ -741,9 +825,9 @@ function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute,
 
       {!isNavigating && routeCoords && <View style={styles.mapControls}><TouchableOpacity style={styles.controlButton} onPress={clearRoute}><X color={COLORS.text.primary} size={16} /><Text style={styles.controlButtonText}>Clear</Text></TouchableOpacity></View>}
 
-      {!isNavigating && showLegend && <View style={styles.legend}><Text style={styles.legendTitle}>Legend</Text><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.info }]} /><Text style={styles.legendText}>Blue Light Stations</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#8B5CF6' }]} /><Text style={styles.legendText}>Walking Groups</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.success }]} /><Text style={styles.legendText}>Safe Route</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.danger }]} /><Text style={styles.legendText}>High Risk Zone</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: COLORS.accent.warning }]} /><Text style={styles.legendText}>Medium Risk Zone</Text></View></View>}
+      {!isNavigating && showLegend && <View style={styles.legend}><Text style={styles.legendTitle}>Legend</Text><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#B8DCEF' }]} /><Text style={styles.legendText}>Blue Light Stations</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#D4B8E8' }]} /><Text style={styles.legendText}>Walking Groups</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#A8E6CF' }]} /><Text style={styles.legendText}>Safe Route</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#FFB5A7' }]} /><Text style={styles.legendText}>High Risk Zone</Text></View><View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#FFE0B2' }]} /><Text style={styles.legendText}>Medium Risk Zone</Text></View></View>}
 
-      {routeInfo && routeCalculated && !isNavigating && <View style={styles.routeInfoPanel}><View style={styles.routeInfoHeader}><Shield color={COLORS.accent.success} size={20} /><Text style={styles.routeInfoTitle}>Safe Route Found</Text></View><View style={styles.routeInfoStats}><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.distance}</Text><Text style={styles.routeInfoStatLabel}>Distance</Text></View><View style={styles.routeInfoStatDivider} /><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.time}</Text><Text style={styles.routeInfoStatLabel}>Time</Text></View></View><TouchableOpacity style={styles.startWalkingButton} onPress={startNavigation}><Navigation color={COLORS.text.primary} size={16} /><Text style={styles.startWalkingButtonText}>Start Walking</Text></TouchableOpacity></View>}
+      {routeInfo && routeCalculated && !isNavigating && <View style={styles.routeInfoPanel}><View style={styles.routeInfoHeader}><Shield color={COLORS.accent.success} size={20} /><Text style={styles.routeInfoTitle}>Safe Route Found</Text></View><View style={styles.routeInfoStats}><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.distance}</Text><Text style={styles.routeInfoStatLabel}>Distance</Text></View><View style={styles.routeInfoStatDivider} /><View style={styles.routeInfoStat}><Text style={styles.routeInfoStatValue}>{routeInfo.time}</Text><Text style={styles.routeInfoStatLabel}>Time</Text></View></View><TouchableOpacity style={styles.startWalkingButton} onPress={startNavigation}><Navigation color="#2D2D2D" size={16} /><Text style={styles.startWalkingButtonText}>Start Walking</Text></TouchableOpacity></View>}
 
       {isNavigating && directions.length > 0 && (
         <View style={styles.navigationPanel}>
@@ -864,8 +948,8 @@ function GroupsScreen({ joinedGroups, setJoinedGroups, userGroups, setUserGroups
 
   return (
     <ScrollView style={styles.screenContainer} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}><Text style={styles.screenTitle}>Walking Groups</Text><TouchableOpacity style={styles.createButton} onPress={() => setShowCreateModal(true)}><Plus color={COLORS.text.primary} size={20} /><Text style={styles.createButtonText}>Create</Text></TouchableOpacity></View>
-      <View style={styles.infoCard}><Users color={COLORS.accent.success} size={24} /><View style={styles.infoCardContent}><Text style={styles.infoCardTitle}>Walk Together, Stay Safe</Text><Text style={styles.infoCardText}>Join a group heading your direction.</Text></View></View>
+      <View style={styles.header}><Text style={[styles.screenTitle, { fontSize: 29 }]}>Walking Groups</Text><TouchableOpacity style={styles.createButton} onPress={() => setShowCreateModal(true)}><Plus color={COLORS.text.primary} size={20} /><Text style={styles.createButtonText}>Create</Text></TouchableOpacity></View>
+      <View style={styles.infoCard}><Users color={COLORS.accent.primary} size={24} /><View style={styles.infoCardContent}><Text style={styles.infoCardTitle}>Walk Together, Stay Safe</Text><Text style={styles.infoCardText}>Join a group heading your direction.</Text></View></View>
 
       {joinedGroups.length > 0 && <><Text style={styles.sectionTitle}>Your Groups</Text>{allGroups.filter(g => isGroupJoined(g.id)).map(group => { const timeRemaining = getTimeRemaining(group), memberCount = Array.isArray(group.members) ? group.members.length : group.members || 1, readyCount = Array.isArray(group.members) ? group.members.filter(m => m.isReady).length : 0; return <SafetyCard key={`j-${group.id}`} title={group.name} subtitle={`${memberCount} members - ${readyCount}/${memberCount} ready`} icon={<Users color={COLORS.accent.info} size={24} />} color={COLORS.accent.info} onPress={() => { setSelectedGroup(group); setShowModal(true); }}>{timeRemaining !== null && <View style={styles.countdownBanner}><Clock color={COLORS.accent.primary} size={14} /><Text style={styles.countdownText}>{timeRemaining > 0 ? `Departing in ${timeRemaining} min` : 'Departing now!'}</Text></View>}<View style={styles.groupDetails}>{group.startLocation && <View style={styles.groupDetailItem}><Navigation color={COLORS.accent.success} size={16} /><Text style={styles.groupDetailText} numberOfLines={1}>From {group.startLocation}</Text></View>}<View style={styles.groupDetailItem}><MapPin color={COLORS.accent.danger} size={16} /><Text style={styles.groupDetailText} numberOfLines={1}>To {group.destination}</Text></View></View><View style={styles.cardAction}><View style={styles.joinedBadge}><Check color={COLORS.accent.success} size={16} /><Text style={styles.joinedBadgeText}>Joined</Text></View></View></SafetyCard>; })}</>}
 
@@ -910,6 +994,10 @@ function ProfileScreen({ showActivityZones, setShowActivityZones, showLegend, se
 
 // Main App
 function App() {
+  const [fontsLoaded] = useFonts({
+    CormorantGaramond_400Regular,
+  });
+
   const [activeTab, setActiveTab] = useState('home');
   const [joinedGroups, setJoinedGroups] = useState([]);
   const [userGroups, setUserGroups] = useState([]);
@@ -960,6 +1048,15 @@ function App() {
   const getDirectionsToGroup = (group) => { setMeetingGroupRoute(group); setActiveTab('map'); };
   const getDirectionsToBlueLight = (blueLight) => { setBlueLightRoute(blueLight); setActiveTab('map'); };
 
+  // Show loading screen while fonts load
+  if (!fontsLoaded) {
+    return (
+      <LinearGradient colors={COLORS.bg.gradient} style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={COLORS.accent.primary} />
+      </LinearGradient>
+    );
+  }
+
   const renderScreen = () => {
     switch (activeTab) {
       case 'home': return <HomeScreen setActiveTab={setActiveTab} getDirectionsToBlueLight={getDirectionsToBlueLight} walkingGroups={walkingGroups} incidents={incidents} />;
@@ -975,299 +1072,302 @@ function App() {
   const TabButton = ({ name, icon, label }) => <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab(name)}>{React.cloneElement(icon, { color: activeTab === name ? COLORS.accent.primary : COLORS.text.muted })}<Text style={[styles.tabLabel, activeTab === name && styles.tabLabelActive]}>{label}</Text></TouchableOpacity>;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
-      <View style={styles.screenWrapper}>{renderScreen()}</View>
-      <View style={styles.tabBar}><TabButton name="home" icon={<Home size={24} />} label="Home" /><TabButton name="map" icon={<Map size={24} />} label="Map" /><SOSTabButton onPress={() => setActiveTab('sos')} onLongPress={handleSOSLongPress} /><TabButton name="groups" icon={<Users size={24} />} label="Groups" /><TabButton name="profile" icon={<User size={24} />} label="Profile" /></View>
-    </SafeAreaView>
+    <LinearGradient colors={COLORS.bg.gradient} style={styles.container}>
+      <SafeAreaView style={styles.containerInner}>
+        <StatusBar style="dark" />
+        <View style={styles.screenWrapper}>{renderScreen()}</View>
+        <View style={styles.tabBar}><TabButton name="home" icon={<Home size={24} />} label="Home" /><TabButton name="map" icon={<Map size={24} />} label="Map" /><SOSTabButton onPress={() => setActiveTab('sos')} onLongPress={handleSOSLongPress} /><TabButton name="groups" icon={<Users size={24} />} label="Groups" /><TabButton name="profile" icon={<User size={24} />} label="Profile" /></View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 // Styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg.primary },
+  container: { flex: 1 },
+  containerInner: { flex: 1 },
   screenWrapper: { flex: 1 },
-  screenContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
-  screenTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.text.primary, marginBottom: 20 },
+  screenContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10, backgroundColor: 'transparent' },
+  screenTitle: { fontSize: 36, fontWeight: '400', color: COLORS.text.primary, marginBottom: 20, fontFamily: 'CormorantGaramond_400Regular' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: COLORS.accent.primary },
-  headerSubtitle: { fontSize: 14, color: COLORS.text.secondary },
-  notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bg.card, justifyContent: 'center', alignItems: 'center' },
-  statusCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(52, 199, 89, 0.15)', borderRadius: 12, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(52, 199, 89, 0.3)' },
+  headerTitle: { fontSize: 36, fontWeight: '400', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular', textTransform: 'lowercase' },
+  headerSubtitle: { fontSize: 16, fontWeight: '300', color: COLORS.text.secondary, fontStyle: 'italic', fontFamily: 'CormorantGaramond_400Regular' },
+  notificationButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.bg.card, justifyContent: 'center', alignItems: 'center', ...SHADOWS.card },
+  statusCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 24, ...SHADOWS.card },
   statusDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: COLORS.accent.success, marginRight: 12 },
-  statusText: { flex: 1, fontSize: 16, fontWeight: '600', color: COLORS.accent.success },
-  statusTime: { fontSize: 12, color: COLORS.text.secondary },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary, marginBottom: 12, marginTop: 8 },
+  statusText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#4CAF50', fontFamily: 'CormorantGaramond_400Regular' },
+  statusTime: { fontSize: 12, color: COLORS.text.secondary, fontFamily: 'CormorantGaramond_400Regular' },
+  sectionTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text.primary, marginBottom: 12, marginTop: 8, fontFamily: 'CormorantGaramond_400Regular' },
   quickActions: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
-  quickAction: { flex: 1, alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginHorizontal: 4, borderWidth: 1, borderColor: COLORS.border },
-  quickActionIcon: { width: 52, height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  quickActionText: { fontSize: 12, color: COLORS.text.primary, textAlign: 'center', fontWeight: '500' },
-  card: { backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: COLORS.border },
+  quickAction: { flex: 1, alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginHorizontal: 4, ...SHADOWS.card },
+  quickActionIcon: { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
+  quickActionText: { fontSize: 12, color: COLORS.text.primary, textAlign: 'center', fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  card: { backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 12, ...SHADOWS.card },
   cardHeader: { flexDirection: 'row', alignItems: 'center' },
-  iconContainer: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  iconContainer: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   cardTitleContainer: { flex: 1 },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text.primary },
-  cardSubtitle: { fontSize: 13, color: COLORS.text.secondary, marginTop: 2 },
+  cardTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  cardSubtitle: { fontSize: 13, color: COLORS.text.secondary, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
   cardContent: { marginTop: 12 },
-  cardAction: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.border },
-  cardActionText: { fontSize: 14, color: COLORS.text.secondary },
-  tabBar: { flexDirection: 'row', backgroundColor: COLORS.bg.secondary, borderTopWidth: 1, borderTopColor: COLORS.border, paddingBottom: 0, paddingTop: 10 },
+  cardAction: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: COLORS.borderLight },
+  cardActionText: { fontSize: 14, color: COLORS.accent.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  tabBar: { flexDirection: 'row', backgroundColor: COLORS.bg.secondary, paddingBottom: 0, paddingTop: 10, ...SHADOWS.card },
   tabButton: { flex: 1, alignItems: 'center', paddingVertical: 8 },
-  tabLabel: { fontSize: 11, color: COLORS.text.muted, marginTop: 4, fontWeight: '500' },
+  tabLabel: { fontSize: 11, color: COLORS.text.muted, marginTop: 4, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
   tabLabelActive: { color: COLORS.accent.primary },
   sosTabButtonContainer: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', marginBottom: 8 },
   sosTabButton: { width: 60, height: 60, borderRadius: 30, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', marginTop: -30, shadowColor: COLORS.accent.danger, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15, elevation: 10, borderWidth: 3, borderColor: COLORS.bg.secondary },
-  sosScreenContainer: { flex: 1, backgroundColor: COLORS.bg.primary, paddingHorizontal: 20, paddingTop: 20, alignItems: 'center' },
-  sosScreenTitle: { fontSize: 32, fontWeight: 'bold', color: COLORS.text.primary, marginBottom: 8 },
-  sosScreenSubtitle: { fontSize: 16, color: COLORS.text.secondary, marginBottom: 40, textAlign: 'center' },
+  sosScreenContainer: { flex: 1, backgroundColor: 'transparent', paddingHorizontal: 20, paddingTop: 20, alignItems: 'center' },
+  sosScreenTitle: { fontSize: 32, fontWeight: 'bold', color: COLORS.text.primary, marginBottom: 8, fontFamily: 'CormorantGaramond_400Regular' },
+  sosScreenSubtitle: { fontSize: 16, color: COLORS.text.secondary, marginBottom: 40, textAlign: 'center', fontFamily: 'CormorantGaramond_400Regular' },
   sosMainButton: { width: 180, height: 180, borderRadius: 90, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', shadowColor: COLORS.accent.danger, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 30, elevation: 15, marginBottom: 50 },
-  sosMainButtonText: { color: COLORS.text.primary, fontSize: 32, fontWeight: 'bold', marginTop: 8 },
-  emergencyContactsTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary, alignSelf: 'flex-start', marginBottom: 16 },
-  emergencyContactItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 12, width: '100%', borderWidth: 1, borderColor: COLORS.border },
-  emergencyContactIcon: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  sosMainButtonText: { color: COLORS.text.primary, fontSize: 32, fontWeight: 'bold', marginTop: 8, fontFamily: 'CormorantGaramond_400Regular' },
+  emergencyContactsTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary, alignSelf: 'flex-start', marginBottom: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  emergencyContactItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 12, width: '100%', ...SHADOWS.card },
+  emergencyContactIcon: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   emergencyContactInfo: { flex: 1 },
-  emergencyContactName: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary },
-  emergencyContactDesc: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2 },
+  emergencyContactName: { fontSize: 18, fontWeight: '600', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  emergencyContactDesc: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
   mapContainer: { flex: 1 },
   map: { flex: 1 },
   mapControls: { position: 'absolute', top: 20, right: 20 },
-  controlButton: { backgroundColor: COLORS.bg.cardSolid, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: COLORS.border },
+  controlButton: { backgroundColor: COLORS.bg.cardSolid, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 6, ...SHADOWS.card },
   controlButtonActive: { backgroundColor: 'rgba(255, 140, 0, 0.3)', borderColor: '#FF8C00' },
   controlButtonIcon: { fontSize: 16 },
-  controlButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '500' },
-  legend: { position: 'absolute', bottom: 20, left: 20, backgroundColor: COLORS.bg.cardSolid, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: COLORS.border },
-  legendTitle: { color: COLORS.text.primary, fontWeight: '600', marginBottom: 10, fontSize: 14 },
+  controlButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  legend: { position: 'absolute', bottom: 20, left: 20, backgroundColor: COLORS.bg.cardSolid, borderRadius: 16, padding: 16, ...SHADOWS.card },
+  legendTitle: { color: COLORS.text.primary, fontWeight: '600', marginBottom: 10, fontSize: 14, fontFamily: 'CormorantGaramond_400Regular' },
   legendItem: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
-  legendText: { color: COLORS.text.secondary, fontSize: 12 },
-  routePanel: { position: 'absolute', top: 10, left: 16, right: 16, backgroundColor: COLORS.bg.cardSolid, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: COLORS.border },
+  legendText: { color: COLORS.text.secondary, fontSize: 12, fontFamily: 'CormorantGaramond_400Regular' },
+  routePanel: { position: 'absolute', top: 10, left: 16, right: 16, backgroundColor: COLORS.bg.cardSolid, borderRadius: 16, padding: 12, ...SHADOWS.card },
   routeInputContainer: { marginBottom: 8 },
   routeInputWrapper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   routeDot: { width: 10, height: 10, borderRadius: 5 },
-  routeInput: { flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 8, padding: 10 },
-  routeInputText: { color: COLORS.text.primary, fontSize: 13 },
-  routeInputPlaceholder: { color: COLORS.text.muted, fontSize: 13 },
+  routeInput: { flex: 1, backgroundColor: COLORS.iconBg.peach, borderRadius: 10, padding: 10 },
+  routeInputText: { color: COLORS.text.primary, fontSize: 13, fontFamily: 'CormorantGaramond_400Regular' },
+  routeInputPlaceholder: { color: COLORS.text.muted, fontSize: 13, fontFamily: 'CormorantGaramond_400Regular' },
   routeInputDivider: { width: 2, height: 12, backgroundColor: COLORS.border, marginLeft: 4, marginVertical: 3 },
-  findRouteButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, gap: 6 },
+  findRouteButton: { backgroundColor: '#A8E6CF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 24, gap: 6, shadowColor: '#A8E6CF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   findRouteButtonDisabled: { backgroundColor: COLORS.text.muted },
-  findRouteButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '600' },
-  startMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent.success, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-  endMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent.danger, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-  blueLightMarker: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.accent.info, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
-  groupMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#8B5CF6', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  findRouteButtonText: { color: '#2D2D2D', fontSize: 14, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  startMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#A8E6CF', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  endMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFB5A7', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  blueLightMarker: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#B8DCEF', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
+  groupMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#D4B8E8', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
   locationPickerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center' },
-  locationPicker: { backgroundColor: COLORS.bg.secondary, borderRadius: 20, width: '85%', maxHeight: '70%', overflow: 'hidden' },
+  locationPicker: { backgroundColor: COLORS.bg.card, borderRadius: 20, width: '85%', maxHeight: '70%', overflow: 'hidden', ...SHADOWS.card },
   locationPickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  locationPickerTitle: { color: COLORS.text.primary, fontSize: 18, fontWeight: '600' },
+  locationPickerTitle: { color: COLORS.text.primary, fontSize: 18, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   locationList: { padding: 10 },
   locationItem: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
   presetMatchItem: { backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: 10, marginHorizontal: 10, marginVertical: 4, borderWidth: 1, borderColor: 'rgba(255, 107, 53, 0.3)' },
-  locationItemText: { color: COLORS.text.primary, fontSize: 16 },
+  locationItemText: { color: COLORS.text.primary, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
   locationItemContent: { flex: 1 },
-  locationItemSubtext: { color: COLORS.text.muted, fontSize: 12, marginTop: 2 },
-  locationSectionTitle: { color: COLORS.text.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, letterSpacing: 0.5 },
-  myLocationItem: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12, backgroundColor: 'rgba(0, 122, 255, 0.1)', marginHorizontal: 10, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0, 122, 255, 0.3)' },
-  myLocationText: { color: COLORS.accent.info, fontSize: 16, fontWeight: '600' },
-  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, paddingHorizontal: 16, marginHorizontal: 20, marginBottom: 10, gap: 12 },
-  searchInput: { flex: 1, color: COLORS.text.primary, fontSize: 16, paddingVertical: 14 },
-  loadingText: { color: COLORS.text.muted, fontSize: 14 },
-  routeInfoPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 14, paddingBottom: 20 },
+  locationItemSubtext: { color: COLORS.text.muted, fontSize: 12, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
+  locationSectionTitle: { color: COLORS.text.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, letterSpacing: 0.5, fontFamily: 'CormorantGaramond_400Regular' },
+  myLocationItem: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12, backgroundColor: 'rgba(30, 64, 175, 0.1)', marginHorizontal: 10, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(30, 64, 175, 0.3)' },
+  myLocationText: { color: '#1E40AF', fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.iconBg.peach, borderRadius: 12, paddingHorizontal: 16, marginHorizontal: 20, marginBottom: 10, gap: 12 },
+  searchInput: { flex: 1, color: COLORS.text.primary, fontSize: 16, paddingVertical: 14, fontFamily: 'CormorantGaramond_400Regular' },
+  loadingText: { color: COLORS.text.muted, fontSize: 14, fontFamily: 'CormorantGaramond_400Regular' },
+  routeInfoPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.bg.cardSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingBottom: 24, ...SHADOWS.card },
   routeInfoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  routeInfoTitle: { color: COLORS.accent.success, fontSize: 15, fontWeight: '600' },
-  routeInfoStats: { flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 10, padding: 10, marginBottom: 10 },
+  routeInfoTitle: { color: COLORS.accent.primary, fontSize: 15, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  routeInfoStats: { flexDirection: 'row', backgroundColor: COLORS.iconBg.peach, borderRadius: 12, padding: 12, marginBottom: 12 },
   routeInfoStat: { flex: 1, alignItems: 'center' },
-  routeInfoStatValue: { color: COLORS.text.primary, fontSize: 18, fontWeight: 'bold' },
-  routeInfoStatLabel: { color: COLORS.text.secondary, fontSize: 11, marginTop: 2 },
+  routeInfoStatValue: { color: COLORS.text.primary, fontSize: 18, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
+  routeInfoStatLabel: { color: COLORS.text.secondary, fontSize: 11, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
   routeInfoStatDivider: { width: 1, backgroundColor: COLORS.border },
-  startWalkingButton: { backgroundColor: COLORS.accent.success, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 10, gap: 6 },
-  startWalkingButtonText: { color: COLORS.text.primary, fontSize: 14, fontWeight: '600' },
-  navigationPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 20 },
+  startWalkingButton: { backgroundColor: '#A8E6CF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 24, gap: 6, shadowColor: '#A8E6CF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  startWalkingButtonText: { color: '#2D2D2D', fontSize: 14, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  navigationPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.bg.cardSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, paddingBottom: 24, ...SHADOWS.card },
   navigationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   navigationHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  navigationTitle: { color: COLORS.accent.success, fontSize: 16, fontWeight: '600' },
+  navigationTitle: { color: COLORS.accent.primary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   exitNavButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 59, 48, 0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, gap: 4 },
-  exitNavButtonText: { color: COLORS.accent.danger, fontSize: 13, fontWeight: '500' },
-  navigationStep: { flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, padding: 12, marginBottom: 10, gap: 12 },
+  exitNavButtonText: { color: COLORS.accent.danger, fontSize: 13, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  navigationStep: { flexDirection: 'row', backgroundColor: COLORS.iconBg.peach, borderRadius: 12, padding: 12, marginBottom: 10, gap: 12 },
   stepIndicator: { flexDirection: 'row', alignItems: 'baseline' },
-  stepNumber: { color: COLORS.accent.success, fontSize: 24, fontWeight: 'bold' },
-  stepTotal: { color: COLORS.text.muted, fontSize: 14 },
+  stepNumber: { color: COLORS.accent.primary, fontSize: 24, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
+  stepTotal: { color: COLORS.text.muted, fontSize: 14, fontFamily: 'CormorantGaramond_400Regular' },
   stepContent: { flex: 1 },
-  stepInstruction: { color: COLORS.text.primary, fontSize: 15, fontWeight: '600', marginBottom: 2 },
-  stepDetail: { color: COLORS.text.secondary, fontSize: 13, lineHeight: 18 },
-  stepDistance: { color: COLORS.accent.success, fontSize: 13, fontWeight: '500', marginTop: 4 },
+  stepInstruction: { color: COLORS.text.primary, fontSize: 15, fontWeight: '600', marginBottom: 2, fontFamily: 'CormorantGaramond_400Regular' },
+  stepDetail: { color: COLORS.text.secondary, fontSize: 13, lineHeight: 18, fontFamily: 'CormorantGaramond_400Regular' },
+  stepDistance: { color: COLORS.accent.primary, fontSize: 13, fontWeight: '500', marginTop: 4, fontFamily: 'CormorantGaramond_400Regular' },
   navigationControls: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  navControlButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, gap: 4 },
-  navControlButtonDisabled: { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
-  navControlText: { color: COLORS.text.primary, fontSize: 13, fontWeight: '500' },
-  navControlTextDisabled: { color: COLORS.text.muted },
+  navControlButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.iconBg.lavender, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, gap: 4 },
+  navControlButtonDisabled: { backgroundColor: COLORS.borderLight },
+  navControlText: { color: COLORS.text.primary, fontSize: 13, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  navControlTextDisabled: { color: COLORS.text.muted, fontFamily: 'CormorantGaramond_400Regular' },
   progressDots: { flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 120 },
-  progressDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.2)' },
-  progressDotActive: { backgroundColor: COLORS.accent.success, width: 14 },
-  progressDotCompleted: { backgroundColor: 'rgba(52, 199, 89, 0.5)' },
-  liveDistanceBanner: { backgroundColor: COLORS.accent.success, borderRadius: 10, padding: 10, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  liveDistanceText: { color: COLORS.text.primary, fontSize: 24, fontWeight: 'bold' },
-  liveDistanceLabel: { color: 'rgba(255, 255, 255, 0.9)', fontSize: 14 },
+  progressDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.borderLight },
+  progressDotActive: { backgroundColor: COLORS.accent.primary, width: 14 },
+  progressDotCompleted: { backgroundColor: 'rgba(255, 155, 138, 0.5)' },
+  liveDistanceBanner: { backgroundColor: COLORS.accent.primary, borderRadius: 12, padding: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  liveDistanceText: { color: COLORS.text.primary, fontSize: 24, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
+  liveDistanceLabel: { color: 'rgba(255, 255, 255, 0.9)', fontSize: 14, fontFamily: 'CormorantGaramond_400Regular' },
   callout: { padding: 10, minWidth: 160 },
-  calloutTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 4 },
-  calloutName: { fontSize: 13, color: '#333' },
-  calloutDistance: { fontSize: 12, color: '#666', marginTop: 2 },
-  directionsPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(30, 41, 59, 0.98)', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  calloutTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 4, fontFamily: 'CormorantGaramond_400Regular' },
+  calloutName: { fontSize: 13, color: '#333', fontFamily: 'CormorantGaramond_400Regular' },
+  calloutDistance: { fontSize: 12, color: '#666', marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
+  directionsPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.bg.cardSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, ...SHADOWS.card },
   directionsPanelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-  directionsPanelTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text.primary },
-  directionsPanelSubtitle: { fontSize: 14, color: COLORS.text.secondary, marginTop: 4 },
+  directionsPanelTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  directionsPanelSubtitle: { fontSize: 14, color: COLORS.text.secondary, marginTop: 4, fontFamily: 'CormorantGaramond_400Regular' },
   directionsInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },
-  directionsInfoText: { fontSize: 16, color: COLORS.text.primary },
-  startButton: { backgroundColor: COLORS.accent.info, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
-  startButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
-  createButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.accent.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, gap: 6 },
-  createButtonText: { color: COLORS.text.primary, fontWeight: '600' },
-  infoCard: { flexDirection: 'row', backgroundColor: 'rgba(52, 199, 89, 0.15)', borderRadius: 16, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(52, 199, 89, 0.3)', gap: 12 },
+  directionsInfoText: { fontSize: 16, color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  startButton: { backgroundColor: COLORS.accent.primary, paddingVertical: 16, borderRadius: 24, alignItems: 'center', ...SHADOWS.button },
+  startButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  createButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.accent.primary, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, gap: 6, ...SHADOWS.button },
+  createButtonText: { color: COLORS.text.primary, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  infoCard: { flexDirection: 'row', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, marginBottom: 24, gap: 12, ...SHADOWS.card },
   infoCardContent: { flex: 1 },
-  infoCardTitle: { fontSize: 16, fontWeight: '600', color: COLORS.accent.success },
-  infoCardText: { fontSize: 14, color: COLORS.text.secondary, marginTop: 4 },
+  infoCardTitle: { fontSize: 16, fontWeight: '600', color: COLORS.accent.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  infoCardText: { fontSize: 14, color: COLORS.text.secondary, marginTop: 4, fontFamily: 'CormorantGaramond_400Regular' },
   groupDetails: { flexDirection: 'column', gap: 4, marginBottom: 12 },
   groupDetailItem: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  groupDetailText: { fontSize: 13, color: COLORS.text.secondary, flex: 1 },
+  groupDetailText: { fontSize: 13, color: COLORS.text.secondary, flex: 1, fontFamily: 'CormorantGaramond_400Regular' },
   modalOverlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'center', alignItems: 'center' },
   zoneInfoPin: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255, 255, 255, 0.4)' },
-  zoneInfoModal: { backgroundColor: COLORS.bg.cardSolid, borderRadius: 20, padding: 20, width: '85%', maxWidth: 340 },
+  zoneInfoModal: { backgroundColor: COLORS.bg.cardSolid, borderRadius: 20, padding: 20, width: '85%', maxWidth: 340, ...SHADOWS.card },
   zoneInfoHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   zoneInfoDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
-  zoneInfoTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text.primary, flex: 1 },
-  zoneInfoDangerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: 14, marginBottom: 16 },
-  zoneInfoDangerLabel: { fontSize: 14, color: COLORS.text.secondary },
-  zoneInfoDangerValue: { fontSize: 24, fontWeight: 'bold' },
+  zoneInfoTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.text.primary, flex: 1, fontFamily: 'CormorantGaramond_400Regular' },
+  zoneInfoDangerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.iconBg.peach, borderRadius: 12, padding: 14, marginBottom: 16 },
+  zoneInfoDangerLabel: { fontSize: 14, color: COLORS.text.secondary, fontFamily: 'CormorantGaramond_400Regular' },
+  zoneInfoDangerValue: { fontSize: 24, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
   zoneInfoSection: { marginBottom: 16 },
-  zoneInfoSectionTitle: { fontSize: 14, fontWeight: '600', color: COLORS.text.secondary, marginBottom: 8 },
+  zoneInfoSectionTitle: { fontSize: 14, fontWeight: '600', color: COLORS.text.secondary, marginBottom: 8, fontFamily: 'CormorantGaramond_400Regular' },
   zoneInfoCrimeItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  zoneInfoCrimeBullet: { color: COLORS.accent.danger, fontSize: 16, marginRight: 8 },
-  zoneInfoCrimeText: { fontSize: 15, color: COLORS.text.primary },
-  zoneInfoPeakText: { fontSize: 14, color: COLORS.text.primary, lineHeight: 20 },
+  zoneInfoCrimeBullet: { color: COLORS.accent.danger, fontSize: 16, marginRight: 8, fontFamily: 'CormorantGaramond_400Regular' },
+  zoneInfoCrimeText: { fontSize: 15, color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  zoneInfoPeakText: { fontSize: 14, color: COLORS.text.primary, lineHeight: 20, fontFamily: 'CormorantGaramond_400Regular' },
   zoneInfoCloseButton: { backgroundColor: COLORS.bg.secondary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 },
-  zoneInfoCloseText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
-  modalContent: { backgroundColor: COLORS.bg.secondary, borderRadius: 24, padding: 32, alignItems: 'center', width: '85%' },
+  zoneInfoCloseText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  modalContent: { backgroundColor: COLORS.bg.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '85%', ...SHADOWS.card },
   modalClose: { position: 'absolute', top: 16, right: 16 },
-  modalTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 16 },
-  modalText: { fontSize: 16, color: COLORS.text.secondary, marginTop: 8 },
-  modalSubtext: { fontSize: 14, color: COLORS.accent.success, marginTop: 4 },
-  joinButton: { backgroundColor: COLORS.accent.success, paddingHorizontal: 48, paddingVertical: 16, borderRadius: 25, marginTop: 24 },
-  joinButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: 'bold' },
+  modalTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  modalText: { fontSize: 16, color: COLORS.text.secondary, marginTop: 8, fontFamily: 'CormorantGaramond_400Regular' },
+  modalSubtext: { fontSize: 14, color: COLORS.accent.success, marginTop: 4, fontFamily: 'CormorantGaramond_400Regular' },
+  joinButton: { backgroundColor: COLORS.accent.primary, paddingHorizontal: 48, paddingVertical: 16, borderRadius: 24, marginTop: 24, ...SHADOWS.button },
+  joinButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
   joinedContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 24, gap: 10 },
-  joinedText: { color: COLORS.accent.success, fontSize: 16, fontWeight: 'bold' },
-  joinedBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(52, 199, 89, 0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, gap: 6 },
-  joinedBadgeText: { color: COLORS.accent.success, fontSize: 14, fontWeight: '600' },
+  joinedText: { color: COLORS.accent.primary, fontSize: 16, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
+  joinedBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.iconBg.mint, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, gap: 6 },
+  joinedBadgeText: { color: COLORS.accent.primary, fontSize: 14, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   emptyState: { padding: 24, alignItems: 'center' },
-  emptyStateText: { color: COLORS.text.muted, fontSize: 14 },
+  emptyStateText: { color: COLORS.text.muted, fontSize: 14, fontFamily: 'CormorantGaramond_400Regular' },
   createFormContainer: { width: '100%', marginTop: 20 },
-  createFormLabel: { color: COLORS.text.secondary, fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 16 },
-  createFormInput: { backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 12, padding: 14, color: COLORS.text.primary, fontSize: 16 },
-  createFormInputText: { color: COLORS.text.primary, fontSize: 16 },
-  createFormPlaceholder: { color: COLORS.text.muted, fontSize: 16 },
-  destinationPickerList: { maxHeight: 150, marginTop: 8, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12 },
+  createFormLabel: { color: COLORS.text.secondary, fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  createFormInput: { backgroundColor: COLORS.iconBg.peach, borderRadius: 12, padding: 14, color: COLORS.text.primary, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  createFormInputText: { color: COLORS.text.primary, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  createFormPlaceholder: { color: COLORS.text.muted, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  destinationPickerList: { maxHeight: 150, marginTop: 8, backgroundColor: COLORS.iconBg.peach, borderRadius: 12 },
   destinationPickerItem: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
-  destinationPickerText: { color: COLORS.text.primary, fontSize: 14, flex: 1 },
+  destinationPickerText: { color: COLORS.text.primary, fontSize: 14, flex: 1, fontFamily: 'CormorantGaramond_400Regular' },
   createFormInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   createLocationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 16 },
-  createLocationTitle: { color: COLORS.text.primary, fontSize: 18, fontWeight: '600' },
+  createLocationTitle: { color: COLORS.text.primary, fontSize: 18, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   createLocationList: { width: '100%', maxHeight: 350, marginTop: 12 },
   emergencyOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center' },
   emergencyContent: { backgroundColor: '#1a1a2e', borderRadius: 24, padding: 32, alignItems: 'center', width: '85%', borderWidth: 2, borderColor: COLORS.accent.danger },
-  emergencyTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.accent.danger, marginTop: 16 },
-  emergencyText: { fontSize: 16, color: COLORS.text.primary, marginTop: 8, textAlign: 'center' },
+  emergencyTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.accent.danger, marginTop: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  emergencyText: { fontSize: 16, color: COLORS.text.primary, marginTop: 8, textAlign: 'center', fontFamily: 'CormorantGaramond_400Regular' },
   callButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.text.primary, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 30, marginTop: 24, gap: 8 },
-  callButtonText: { color: COLORS.accent.danger, fontSize: 18, fontWeight: 'bold' },
+  callButtonText: { color: COLORS.accent.danger, fontSize: 18, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
   cancelButton: { paddingHorizontal: 32, paddingVertical: 12, marginTop: 16 },
-  cancelButtonText: { color: COLORS.text.secondary, fontSize: 16 },
-  profileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: COLORS.border },
+  cancelButtonText: { color: COLORS.text.secondary, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
+  profileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 20, ...SHADOWS.card },
   avatarContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: COLORS.accent.primary, justifyContent: 'center', alignItems: 'center' },
   profileInfo: { flex: 1, marginLeft: 16 },
-  profileName: { fontSize: 20, fontWeight: '600', color: COLORS.text.primary },
-  profileEmail: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2 },
+  profileName: { fontSize: 20, fontWeight: '600', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  profileEmail: { fontSize: 14, color: COLORS.text.secondary, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
   editButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.accent.primary },
-  editButtonText: { color: COLORS.accent.primary, fontWeight: '500' },
-  statsContainer: { flexDirection: 'row', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: COLORS.border },
+  editButtonText: { color: COLORS.accent.primary, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  statsContainer: { flexDirection: 'row', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 20, marginBottom: 24, ...SHADOWS.card },
   statItem: { flex: 1, alignItems: 'center' },
-  statNumber: { fontSize: 28, fontWeight: 'bold', color: COLORS.accent.primary },
-  statLabel: { fontSize: 12, color: COLORS.text.secondary, marginTop: 4 },
+  statNumber: { fontSize: 28, fontWeight: 'bold', color: COLORS.accent.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  statLabel: { fontSize: 12, color: COLORS.text.secondary, marginTop: 4, fontFamily: 'CormorantGaramond_400Regular' },
   statDivider: { width: 1, backgroundColor: COLORS.border },
-  settingsCard: { backgroundColor: COLORS.bg.card, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
+  settingsCard: { backgroundColor: COLORS.bg.card, borderRadius: 16, marginBottom: 16, overflow: 'hidden', ...SHADOWS.card },
   settingItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
-  settingIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.05)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  settingIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.iconBg.peach, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   settingContent: { flex: 1 },
-  settingTitle: { fontSize: 16, color: COLORS.text.primary },
-  settingSubtitle: { fontSize: 13, color: COLORS.text.muted, marginTop: 2 },
+  settingTitle: { fontSize: 16, color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  settingSubtitle: { fontSize: 13, color: COLORS.text.muted, marginTop: 2, fontFamily: 'CormorantGaramond_400Regular' },
   departureTimeContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  departureTimeOption: { flex: 1, paddingVertical: 12, paddingHorizontal: 8, borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.1)', alignItems: 'center' },
+  departureTimeOption: { flex: 1, paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, backgroundColor: COLORS.iconBg.peach, alignItems: 'center' },
   departureTimeOptionActive: { backgroundColor: COLORS.accent.primary },
-  departureTimeText: { color: COLORS.text.secondary, fontSize: 14, fontWeight: '600' },
-  departureTimeTextActive: { color: COLORS.text.primary },
-  departureTimeHint: { fontSize: 12, color: COLORS.text.muted, marginTop: 8, textAlign: 'center' },
-  countdownBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 107, 53, 0.15)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, gap: 6, marginTop: 8, marginBottom: 4 },
-  countdownText: { color: COLORS.accent.primary, fontSize: 12, fontWeight: '600' },
-  modalCountdown: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 107, 53, 0.15)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginTop: 8 },
-  modalCountdownText: { color: COLORS.accent.primary, fontSize: 14, fontWeight: '600' },
+  departureTimeText: { color: COLORS.text.secondary, fontSize: 14, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  departureTimeTextActive: { color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
+  departureTimeHint: { fontSize: 12, color: COLORS.text.muted, marginTop: 8, textAlign: 'center', fontFamily: 'CormorantGaramond_400Regular' },
+  countdownBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.iconBg.peach, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, gap: 6, marginTop: 8, marginBottom: 4 },
+  countdownText: { color: COLORS.accent.primary, fontSize: 12, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  modalCountdown: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.iconBg.peach, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginTop: 8 },
+  modalCountdownText: { color: COLORS.accent.primary, fontSize: 14, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   memberListContainer: { width: '100%', marginTop: 16 },
-  memberListTitle: { fontSize: 14, color: COLORS.text.muted, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  memberListTitle: { fontSize: 14, color: COLORS.text.muted, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'CormorantGaramond_400Regular' },
   memberItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   memberInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  memberName: { color: COLORS.text.primary, fontSize: 16 },
+  memberName: { color: COLORS.text.primary, fontSize: 16, fontFamily: 'CormorantGaramond_400Regular' },
   memberStatus: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 4 },
-  memberStatusReady: { backgroundColor: 'rgba(52, 199, 89, 0.15)' },
-  memberStatusWaiting: { backgroundColor: 'rgba(255, 149, 0, 0.15)' },
-  memberStatusText: { fontSize: 12, fontWeight: '600' },
-  memberStatusTextReady: { color: COLORS.accent.success },
-  memberStatusTextWaiting: { color: COLORS.accent.warning },
-  memberSubtext: { color: COLORS.text.muted, fontSize: 14, textAlign: 'center', paddingVertical: 12 },
-  imHereButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.accent.success, paddingVertical: 14, borderRadius: 12, marginTop: 16, gap: 8 },
-  imHereButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: 'bold' },
-  viewRouteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 122, 255, 0.15)', paddingVertical: 14, borderRadius: 12, marginTop: 12, gap: 8 },
-  viewRouteButtonText: { color: COLORS.accent.info, fontSize: 16, fontWeight: '600' },
+  memberStatusReady: { backgroundColor: COLORS.iconBg.mint },
+  memberStatusWaiting: { backgroundColor: COLORS.iconBg.peach },
+  memberStatusText: { fontSize: 12, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  memberStatusTextReady: { color: '#4CAF50', fontFamily: 'CormorantGaramond_400Regular' },
+  memberStatusTextWaiting: { color: '#FF9800', fontFamily: 'CormorantGaramond_400Regular' },
+  memberSubtext: { color: COLORS.text.muted, fontSize: 14, textAlign: 'center', paddingVertical: 12, fontFamily: 'CormorantGaramond_400Regular' },
+  imHereButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.accent.primary, paddingVertical: 14, borderRadius: 24, marginTop: 16, gap: 8, ...SHADOWS.button },
+  imHereButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
+  viewRouteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.iconBg.lavender, paddingVertical: 14, borderRadius: 24, marginTop: 12, gap: 8 },
+  viewRouteButtonText: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   // Notification badge
   notificationBadge: { position: 'absolute', top: -2, right: -2, backgroundColor: COLORS.accent.danger, borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
-  notificationBadgeText: { color: COLORS.text.primary, fontSize: 10, fontWeight: 'bold' },
+  notificationBadgeText: { color: COLORS.text.primary, fontSize: 10, fontWeight: 'bold', fontFamily: 'CormorantGaramond_400Regular' },
   // Incident Feed
-  incidentFeedContainer: { flex: 1, backgroundColor: COLORS.bg.primary },
+  incidentFeedContainer: { flex: 1, backgroundColor: 'transparent' },
   feedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
   backButton: { padding: 4 },
-  feedTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary },
+  feedTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
   filterContainer: { flexDirection: 'row', paddingHorizontal: 16, marginBottom: 12, gap: 8 },
-  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.bg.card, borderWidth: 1, borderColor: COLORS.border },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.bg.card, ...SHADOWS.card },
   filterChipActive: { backgroundColor: COLORS.accent.primary, borderColor: COLORS.accent.primary },
-  filterChipText: { color: COLORS.text.secondary, fontSize: 14, fontWeight: '500' },
-  filterChipTextActive: { color: COLORS.text.primary },
+  filterChipText: { color: COLORS.text.secondary, fontSize: 14, fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  filterChipTextActive: { color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
   incidentList: { flex: 1, paddingHorizontal: 16 },
-  incidentCard: { backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 14, marginBottom: 12, borderLeftWidth: 4, borderWidth: 1, borderColor: COLORS.border },
+  incidentCard: { backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 14, marginBottom: 12, borderLeftWidth: 4, ...SHADOWS.card },
   incidentHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   incidentTypeIcon: { fontSize: 18 },
-  incidentTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.text.primary },
+  incidentTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
   incidentBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  incidentBadgeVTPD: { backgroundColor: 'rgba(0, 122, 255, 0.2)' },
+  incidentBadgeVTPD: { backgroundColor: 'rgba(30, 64, 175, 0.2)' },
   incidentBadgeCommunity: { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
-  incidentBadgeText: { fontSize: 10, fontWeight: '600', color: COLORS.text.primary },
+  incidentBadgeText: { fontSize: 10, fontWeight: '600', color: COLORS.text.primary, fontFamily: 'CormorantGaramond_400Regular' },
   incidentMeta: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
-  incidentLocation: { color: COLORS.text.secondary, fontSize: 13, flex: 1 },
-  incidentTime: { color: COLORS.text.muted, fontSize: 12 },
-  incidentDescription: { color: COLORS.text.secondary, fontSize: 13, lineHeight: 19, marginBottom: 10 },
+  incidentLocation: { color: COLORS.text.secondary, fontSize: 13, flex: 1, fontFamily: 'CormorantGaramond_400Regular' },
+  incidentTime: { color: COLORS.text.muted, fontSize: 12, fontFamily: 'CormorantGaramond_400Regular' },
+  incidentDescription: { color: COLORS.text.secondary, fontSize: 13, lineHeight: 19, marginBottom: 10, fontFamily: 'CormorantGaramond_400Regular' },
   incidentFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   verifyCount: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, gap: 4 },
-  verifyCountText: { color: COLORS.text.muted, fontSize: 13, fontWeight: '600' },
+  verifyCountText: { color: COLORS.text.muted, fontSize: 13, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
   verifyButton: { backgroundColor: 'rgba(255, 107, 53, 0.15)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12 },
-  verifyButtonText: { color: COLORS.accent.primary, fontSize: 13, fontWeight: '600' },
-  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.accent.primary, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
+  verifyButtonText: { color: COLORS.accent.primary, fontSize: 13, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.accent.primary, justifyContent: 'center', alignItems: 'center', ...SHADOWS.button },
   // Report Modal
-  reportModalTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 8, marginBottom: 4 },
-  reportModalSubtitle: { fontSize: 14, color: COLORS.text.secondary, marginBottom: 20 },
+  reportModalTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text.primary, marginTop: 8, marginBottom: 4, fontFamily: 'CormorantGaramond_400Regular' },
+  reportModalSubtitle: { fontSize: 14, color: COLORS.text.secondary, marginBottom: 20, fontFamily: 'CormorantGaramond_400Regular' },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, width: '100%' },
-  typeButton: { width: '48%', backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
+  typeButton: { width: '48%', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, alignItems: 'center', ...SHADOWS.card },
   typeButtonIcon: { fontSize: 28, marginBottom: 8 },
-  typeButtonLabel: { fontSize: 12, color: COLORS.text.primary, textAlign: 'center', fontWeight: '500' },
-  reportInput: { width: '100%', backgroundColor: COLORS.bg.card, borderRadius: 12, padding: 16, color: COLORS.text.primary, fontSize: 16, borderWidth: 1, borderColor: COLORS.border, marginBottom: 20 },
+  typeButtonLabel: { fontSize: 12, color: COLORS.text.primary, textAlign: 'center', fontWeight: '500', fontFamily: 'CormorantGaramond_400Regular' },
+  reportInput: { width: '100%', backgroundColor: COLORS.bg.card, borderRadius: 16, padding: 16, color: COLORS.text.primary, fontSize: 16, marginBottom: 20, fontFamily: 'CormorantGaramond_400Regular', ...SHADOWS.card },
   reportNavButtons: { flexDirection: 'row', gap: 12, width: '100%' },
-  reportNavButton: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: COLORS.bg.card, borderWidth: 1, borderColor: COLORS.border },
-  reportNavButtonPrimary: { backgroundColor: COLORS.accent.primary, borderColor: COLORS.accent.primary },
-  reportNavButtonText: { color: COLORS.text.secondary, fontSize: 16, fontWeight: '600' },
-  reportNavButtonTextPrimary: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600' },
+  reportNavButton: { flex: 1, paddingVertical: 14, borderRadius: 24, alignItems: 'center', backgroundColor: COLORS.bg.card, ...SHADOWS.card },
+  reportNavButtonPrimary: { backgroundColor: COLORS.accent.primary, ...SHADOWS.button },
+  reportNavButtonText: { color: COLORS.text.secondary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
+  reportNavButtonTextPrimary: { color: COLORS.text.primary, fontSize: 16, fontWeight: '600', fontFamily: 'CormorantGaramond_400Regular' },
 });
 
 registerRootComponent(App);

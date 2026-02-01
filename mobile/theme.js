@@ -1,14 +1,51 @@
-// Centralized color palette for Lumina app
+// Soft Pink/Coral Design System for Lumina app
 export const COLORS = {
-  bg: { primary: '#0f172a', secondary: '#1e293b', card: 'rgba(30, 41, 59, 0.8)', cardSolid: 'rgba(30, 41, 59, 0.95)' },
-  border: 'rgba(255, 255, 255, 0.1)',
-  borderLight: 'rgba(255, 255, 255, 0.05)',
-  text: { primary: '#fff', secondary: '#8892b0', muted: '#64748b', dark: '#475569' },
-  accent: { primary: '#FF6B35', danger: '#FF3B30', success: '#34C759', info: '#007AFF', warning: '#FF9500' },
-  overlay: 'rgba(0, 0, 0, 0.7)',
+  bg: {
+    gradient: ['#E8BEBE', '#FFF8F8'],  // Harsher pink gradient (17.5% more contrast)
+    primary: '#FFF5F5',
+    secondary: '#FFFFFF',
+    card: '#FFFFFF',
+    cardSolid: '#FFFFFF',
+  },
+  border: 'rgba(0, 0, 0, 0.06)',
+  borderLight: 'rgba(0, 0, 0, 0.03)',
+  text: {
+    primary: '#2D2D2D',      // Dark brown/charcoal
+    secondary: '#5C5C5C',     // Gray 40% darker
+    muted: '#707070',         // Gray 40% darker
+    dark: '#2D2D2D',
+  },
+  accent: {
+    primary: '#CC7C6E',       // Coral 25% darker (tab buttons)
+    danger: '#FF6B6B',        // Soft red
+    success: '#A8E6CF',       // Soft mint green
+    info: '#B8DCEF',          // Darker blue (15% darker)
+    warning: '#FFE0B2',       // Soft orange
+    lavender: '#F3E5F5',      // Lavender background
+    peach: '#FFE5DC',         // Peach background
+  },
+  overlay: 'rgba(0, 0, 0, 0.3)',
+  iconBg: {
+    blue: '#B8DCEF',          // Darker blue (15% darker)
+    lavender: '#F3E5F5',
+    peach: '#FFE5DC',
+    mint: '#E8F5E9',
+  }
 };
 
 export const SHADOWS = {
-  small: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
-  medium: { shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8 },
+  card: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  button: {
+    shadowColor: '#CC7C6E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
 };
