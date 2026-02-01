@@ -11,14 +11,14 @@ import { getZoneDangerLevel, getDynamicIntensity, getSafeRoute } from '../utils/
 import { findMatchingVTLocation, geocodeLocation, getAddressSuggestions } from '../utils/locationUtils.js';
 import styles from '../styles/styles.js';
 
-const formatDist = d => d > 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
+const formatDist = d => { const miles = d * 0.000621371; return miles >= 0.1 ? `${miles.toFixed(1)} mi` : `${Math.round(d * 3.28084)} ft`; };
 const EDGE_PADDING = { top: 100, right: 50, bottom: 150, left: 50 };
 
 export default function MapScreen({ viewingGroupRoute, setViewingGroupRoute, meetingGroupRoute, setMeetingGroupRoute, showActivityZones, showLegend, blueLightRoute, setBlueLightRoute, walkingGroups = [] }) {
-  const mapRef = useRef(null), searchTimeoutRef = useRef(null), locationSubscription = useRef(null);
+  const mapRef = useRef(null), searchTimeoutRef = useRef(null), locationSubscription = useRef(null), coordsRef = useRef({ start: null, end: null });
   const [state, setState] = useState({ selectedStation: null, showDirections: false, startLocation: '', endLocation: '', startCoords: null, endCoords: null, routeCoords: null, isLoadingRoute: false, showLocationPicker: null, routeInfo: null, geoapifySteps: [], searchText: '', suggestions: [], isLoadingSuggestions: false, isNavigating: false, currentStep: 0, directions: [], liveLocation: null, distanceToNextStep: null, selectedZone: null, routeCalculated: false });
   const { selectedStation, showDirections, startLocation, endLocation, startCoords, endCoords, routeCoords, isLoadingRoute, showLocationPicker, routeInfo, geoapifySteps, searchText, suggestions, isLoadingSuggestions, isNavigating, currentStep, directions, liveLocation, distanceToNextStep, selectedZone, routeCalculated } = state;
-  const set = updates => setState(s => ({ ...s, ...updates }));
+  const set = updates => { if (updates.startCoords) coordsRef.current.start = updates.startCoords; if (updates.endCoords) coordsRef.current.end = updates.endCoords; setState(s => ({ ...s, ...updates })); };
 
   const getDistanceBetween = (c1, c2) => c1 && c2 ? getDistanceMeters(c1, c2) : Infinity;
 
@@ -84,8 +84,8 @@ export default function MapScreen({ viewingGroupRoute, setViewingGroupRoute, mee
     let coords = { latitude: loc.latitude, longitude: loc.longitude };
     const name = loc.shortName || loc.name;
     if (loc.needsGeocode || loc.isPreset) { const api = await geocodeLocation(name + ', Virginia Tech, Blacksburg, VA', VT_CENTER); if (api) coords = api; }
-    set(type === 'start' ? { startLocation: name, startCoords: coords } : { endLocation: name, endCoords: coords });
-    set({ showLocationPicker: null, searchText: '', suggestions: [] });
+    // Combine state updates into single call to avoid timing issues
+    set({ ...(type === 'start' ? { startLocation: name, startCoords: coords } : { endLocation: name, endCoords: coords }), showLocationPicker: null, searchText: '', suggestions: [] });
     mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.006, longitudeDelta: 0.006 }, 400);
   };
 
@@ -98,16 +98,18 @@ export default function MapScreen({ viewingGroupRoute, setViewingGroupRoute, mee
   };
 
   const handleFindRoute = async () => {
-    const start = startCoords || await geocodeLocation(startLocation + ', Blacksburg, VA', VT_CENTER) || VT_LOCATIONS.find(l => l.name === startLocation);
-    const end = endCoords || await geocodeLocation(endLocation + ', Blacksburg, VA', VT_CENTER) || VT_LOCATIONS.find(l => l.name === endLocation);
+    // Use ref values for synchronous access to latest coords
+    const start = coordsRef.current.start || startCoords || await geocodeLocation(startLocation + ', Blacksburg, VA', VT_CENTER) || VT_LOCATIONS.find(l => l.name === startLocation);
+    const end = coordsRef.current.end || endCoords || await geocodeLocation(endLocation + ', Blacksburg, VA', VT_CENTER) || VT_LOCATIONS.find(l => l.name === endLocation);
     if (!start || !end) { alert('Please select valid locations'); return; }
-    if (!startCoords) set({ startCoords: start });
-    if (!endCoords) set({ endCoords: end });
+    if (!coordsRef.current.start) set({ startCoords: start });
+    if (!coordsRef.current.end) set({ endCoords: end });
     processRoute(start, end);
   };
 
   const clearRoute = () => {
     locationSubscription.current?.remove(); locationSubscription.current = null;
+    coordsRef.current = { start: null, end: null };
     set({ routeCoords: null, routeInfo: null, startLocation: '', endLocation: '', startCoords: null, endCoords: null, geoapifySteps: [], isNavigating: false, directions: [], currentStep: 0, routeCalculated: false, liveLocation: null, distanceToNextStep: null });
   };
 
@@ -169,6 +171,7 @@ export default function MapScreen({ viewingGroupRoute, setViewingGroupRoute, mee
 
       {isNavigating && directions.length > 0 && <View style={styles.navigationPanel}>
         <View style={styles.navigationHeader}><View style={styles.navigationHeaderLeft}><Navigation color={COLORS.accent.success} size={24} /><Text style={styles.navigationTitle}>{liveLocation ? 'Live Navigation' : 'Navigating'}</Text></View><TouchableOpacity onPress={exitNavigation} style={styles.exitNavButton}><X color={COLORS.accent.danger} size={20} /><Text style={styles.exitNavButtonText}>Exit</Text></TouchableOpacity></View>
+        {routeInfo && <View style={styles.navRouteInfo}><Text style={styles.navRouteInfoText}>{routeInfo.distance} • {routeInfo.time} remaining</Text></View>}
         {distanceToNextStep !== null && <View style={styles.liveDistanceBanner}><Text style={styles.liveDistanceText}>In {formatDist(distanceToNextStep)}</Text><Text style={styles.liveDistanceLabel}>to next turn</Text></View>}
         <View style={styles.navigationStep}><View style={styles.stepIndicator}><Text style={styles.stepNumber}>{currentStep + 1}</Text><Text style={styles.stepTotal}>/ {directions.length}</Text></View><View style={styles.stepContent}><Text style={styles.stepInstruction}>{directions[currentStep]?.instruction}</Text><Text style={styles.stepDetail}>{directions[currentStep]?.detail}</Text>{!distanceToNextStep && directions[currentStep]?.distance && <Text style={styles.stepDistance}>{directions[currentStep]?.distance}</Text>}</View></View>
         <View style={styles.navigationControls}><TouchableOpacity style={[styles.navControlButton, currentStep === 0 && styles.navControlButtonDisabled]} onPress={() => navStep(-1)} disabled={currentStep === 0}><ChevronRight color={currentStep === 0 ? COLORS.text.muted : COLORS.text.primary} size={24} style={{ transform: [{ rotate: '180deg' }] }} /><Text style={[styles.navControlText, currentStep === 0 && styles.navControlTextDisabled]}>Previous</Text></TouchableOpacity><View style={styles.progressDots}>{directions.map((_, i) => <View key={i} style={[styles.progressDot, i === currentStep && styles.progressDotActive, i < currentStep && styles.progressDotCompleted]} />)}</View><TouchableOpacity style={[styles.navControlButton, currentStep === directions.length - 1 && styles.navControlButtonDisabled]} onPress={() => navStep(1)} disabled={currentStep === directions.length - 1}><Text style={[styles.navControlText, currentStep === directions.length - 1 && styles.navControlTextDisabled]}>Next</Text><ChevronRight color={currentStep === directions.length - 1 ? COLORS.text.muted : COLORS.text.primary} size={24} /></TouchableOpacity></View>
